@@ -487,8 +487,8 @@ object SteamManager {
             licenses = licenses,
             debug = true,
             useLanCache = false,
-            maxDownloads = 4,
-            maxDecompress = 2,
+            maxDownloads = 24, // potongan mod kecil-kecil: banyak permintaan paralel = jauh lebih cepat
+            maxDecompress = 4,
             maxFileWrites = 1,
         )
         dd.addListener(object : IDownloadListener {

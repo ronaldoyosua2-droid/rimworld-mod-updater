@@ -283,6 +283,13 @@ class MainActivity : AppCompatActivity() {
         else -> "$b B"
     }
 
+    /** Durasi yang enak dibaca: 45 dtk, 2 mnt 5 dtk, 1 jam 3 mnt. */
+    private fun fmtDur(secs: Long): String = when {
+        secs < 60 -> "$secs dtk"
+        secs < 3600 -> "${secs / 60} mnt" + if (secs % 60 != 0L) " ${secs % 60} dtk" else ""
+        else -> "${secs / 3600} jam" + if ((secs % 3600) / 60 != 0L) " ${(secs % 3600) / 60} mnt" else ""
+    }
+
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
 
     private fun renderList() {
@@ -588,7 +595,7 @@ class MainActivity : AppCompatActivity() {
                                     panel.stats(
                                         "$mfDone/${needContent.size}" to "daftar file",
                                         "4" to "jalur paralel",
-                                        "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                                        fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
                                     )
                                     r.onSuccess { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.size} files", "OK") }
                                     r.onFailure { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.message}", error = true) }
@@ -608,7 +615,7 @@ class MainActivity : AppCompatActivity() {
                             panel.stats(
                                 "${i + 1}/${needContent.size}" to "mod",
                                 "$diffMods" to "perlu update",
-                                "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                                fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
                             )
                             progress("Membandingkan file…")
                             setFraction(0.5f + 0.5f * i / needContent.size)
@@ -651,7 +658,7 @@ class MainActivity : AppCompatActivity() {
                 panel.badge("SELESAI")
                 panel.fraction(1f)
                 panel.detail("")
-                panel.log("DONE", "${targets.size} mod dicek dalam ${(System.currentTimeMillis() - t0) / 1000} dtk", "✓")
+                panel.log("DONE", "${targets.size} mod dicek dalam ${fmtDur((System.currentTimeMillis() - t0) / 1000)}", "✓")
                 setBusy(false)
                 toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod perlu diupdate")
             } catch (e: Exception) {
@@ -799,16 +806,24 @@ class MainActivity : AppCompatActivity() {
             val chunks = java.util.concurrent.atomic.AtomicInteger(0)
             val size = m.remoteSize
             val fileTotal = m.remoteFileCount
+            // kecepatan dihitung dari 4 detik terakhir (bukan sejak mulai, karena awal-awal ada proses login/daftar file)
+            val samples = ArrayDeque<Pair<Long, Long>>()
             fun dlStats() {
                 val got = bytes.get()
-                val secs = ((System.currentTimeMillis() - t0) / 1000.0).coerceAtLeast(0.5)
-                val speed = got / secs
+                val now = System.currentTimeMillis()
+                val speed: Double
+                synchronized(samples) {
+                    samples.addLast(now to got)
+                    while (samples.size > 2 && now - samples.first().first > 4000) samples.removeFirst()
+                    val (t1, b1) = samples.first()
+                    speed = if (now - t1 >= 300) (got - b1) * 1000.0 / (now - t1) else 0.0
+                }
                 val left = if (size > 0 && speed > 0) ((size - got).coerceAtLeast(0) / speed).toLong() else -1
                 panel.stats(
                     (if (fileTotal > 0) "${files.get()}/$fileTotal" else "${files.get()}") to "file",
                     fmtSize(got) to (if (size > 0) "dari ${fmtSize(size)}" else "terunduh"),
                     "${fmtSize(speed.toLong())}/s" to "kecepatan",
-                    (if (left >= 0) "~${left} dtk" else "-") to "sisa",
+                    (if (left >= 0) "~${fmtDur(left)}" else "-") to "sisa",
                 )
                 onProgress("Download ${fmtSize(got)}" + if (size > 0) " / ${fmtSize(size)}" else "")
             }
@@ -844,7 +859,7 @@ class MainActivity : AppCompatActivity() {
                 panel.stats(
                     "${(f * copyTotal).toInt()}/$copyTotal" to "file disalin",
                     fmtSize(bytes.get().coerceAtLeast(size)) to "ukuran",
-                    "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                    fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
                 )
             }
             ModFiles.ensurePublishedId(work, m.workshopId)

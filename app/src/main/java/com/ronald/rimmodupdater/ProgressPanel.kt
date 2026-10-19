@@ -205,7 +205,6 @@ class ProgressPanel(private val ctx: Context) {
             typeface = mono
             setTextColor(tGreen)
             setLineSpacing(0f, 1.25f)
-            setHorizontallyScrolling(true)
             setPadding(px(8), px(7), px(8), px(7))
             setShadowLayer(6f * density, 0f, 0f, Color.argb(90, 80, 255, 150))
             minLines = this@ProgressPanel.maxLines
@@ -222,7 +221,12 @@ class ProgressPanel(private val ctx: Context) {
             addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(View(ctx).apply { setBackgroundColor(Color.parseColor("#1F3B2B")) },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(1)))
-            addView(termText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            // geser ke kanan/kiri untuk membaca baris panjang
+            addView(android.widget.HorizontalScrollView(ctx).apply {
+                isHorizontalScrollBarEnabled = true
+                isFillViewport = true
+                addView(termText, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         view.addView(term, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = px(10)
