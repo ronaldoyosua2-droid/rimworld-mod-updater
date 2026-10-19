@@ -1,4 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 plugins {
     id("com.android.application")
@@ -15,8 +18,8 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
-        val buildTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Jakarta"))
-            .format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))
+        val buildTime = ZonedDateTime.now(ZoneId.of("Asia/Jakarta"))
+            .format(DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))
         buildConfigField("String", "BUILD_TIME", "\"$buildTime WIB\"")
     }
 
