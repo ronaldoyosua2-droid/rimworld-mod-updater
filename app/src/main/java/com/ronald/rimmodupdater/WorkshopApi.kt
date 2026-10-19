@@ -15,6 +15,8 @@ object WorkshopApi {
         val timeUpdated: Long,
         val fileSize: Long,
         val appId: Int,
+        /** ID versi konten (manifest) di Steam. Berubah setiap kali mod di-update. */
+        val contentId: String,
     )
 
     /** Ambil ID Workshop dari link (…?id=123…) atau angka biasa. */
@@ -56,6 +58,7 @@ object WorkshopApi {
                             timeUpdated = o.optLong("time_updated"),
                             fileSize = o.optString("file_size").toLongOrNull() ?: 0L,
                             appId = o.optInt("consumer_app_id"),
+                            contentId = o.optString("hcontent_file"),
                         )
                     }
                 }

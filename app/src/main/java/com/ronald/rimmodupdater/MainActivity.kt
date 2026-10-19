@@ -283,7 +283,12 @@ class MainActivity : AppCompatActivity() {
             else -> "link"
         }
         box.addView(TextView(this).apply {
-            text = "ID ${m.workshopId.ifBlank { "?" }} • sumber: $src\nPunyamu: ${fmt(m.localTime)}\nWorkshop: ${fmt(m.remoteTime)}"
+            val ver = when {
+                m.installedVersion.isEmpty() -> "belum dicek isinya"
+                m.remoteVersion.isEmpty() || m.installedVersion == m.remoteVersion -> "sama dengan Workshop"
+                else -> "lebih lama dari Workshop"
+            }
+            text = "ID ${m.workshopId.ifBlank { "?" }} • sumber: $src\nWorkshop diupdate: ${fmt(m.remoteTime)}\nVersi punyamu: $ver"
             textSize = 12f
             alpha = 0.8f
         })
@@ -303,7 +308,7 @@ class MainActivity : AppCompatActivity() {
         })
         val label = if (m.sourceType == "none") "Download" else "Update"
         val bUpdate = button(label) { updateMods(listOf(m)) }.apply {
-            isEnabled = !busy && m.workshopId.isNotBlank() && (m.updateAvailable || m.sourceType == "none" || m.remoteTime == 0L)
+            isEnabled = !busy && m.workshopId.isNotBlank() && (m.updateAvailable || m.sourceType == "none" || m.installedVersion.isEmpty())
         }
         val bForce = button("Paksa") {
             MaterialAlertDialogBuilder(this).setTitle("Download ulang?")
@@ -476,7 +481,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 AppLog.i("Cek update ${targets.size} mod")
                 val details = withContext(Dispatchers.IO) { WorkshopApi.getDetails(targets.map { it.workshopId }) }
-                var updates = 0
+                val needContent = mutableListOf<ModEntry>()
                 targets.forEach { m ->
                     val d = details[m.workshopId]
                     when {
@@ -491,20 +496,63 @@ class MainActivity : AppCompatActivity() {
                         else -> {
                             m.remoteTitle = d.title
                             m.remoteTime = d.timeUpdated
-                            if (m.sourceType == "none") {
-                                m.updateAvailable = m.localTime == 0L || d.timeUpdated > m.localTime + 60
-                                m.status = if (m.localTime == 0L) "Siap di-download" else if (m.updateAvailable) "Ada update!" else "Terbaru ✓"
-                            } else {
-                                m.updateAvailable = m.localTime == 0L || d.timeUpdated > m.localTime + 60
-                                m.status = if (m.updateAvailable) "Ada update!" else "Terbaru ✓"
+                            m.remoteVersion = d.contentId
+                            when {
+                                m.installedVersion.isNotEmpty() -> {
+                                    m.updateAvailable = m.installedVersion != d.contentId
+                                    m.status = if (m.updateAvailable) "Ada update!" else "Terbaru ✓"
+                                }
+                                m.sourceType == "none" -> {
+                                    m.updateAvailable = true
+                                    m.status = "Siap di-download"
+                                }
+                                else -> needContent += m
                             }
-                            if (m.updateAvailable) updates++
+                        }
+                    }
+                }
+                store.save(mods)
+                renderList()
+
+                // Mod yang versinya belum diketahui: bandingkan isi file dengan daftar file resmi di Steam.
+                if (needContent.isNotEmpty()) {
+                    AppLog.i("${needContent.size} mod perlu dicek isinya")
+                    showProgress("${needContent.size} mod perlu dicek isinya, butuh login Steam…")
+                    if (!ensureSteam()) {
+                        needContent.forEach {
+                            it.updateAvailable = false
+                            it.status = "Versi belum diketahui. Login Steam lalu tekan Cek update lagi."
+                        }
+                    } else {
+                        refreshSteamStatus()
+                        needContent.forEachIndexed { i, m ->
+                            val prefix = "Cek isi [${i + 1}/${needContent.size}] ${m.displayName}: "
+                            progress(prefix + "ambil daftar file dari Steam…")
+                            try {
+                                val r = compareContent(m) { progress(prefix + it) }
+                                if (r.same) {
+                                    m.installedVersion = m.remoteVersion
+                                    m.updateAvailable = false
+                                    m.status = "Terbaru ✓ (isi sama dengan Workshop)"
+                                } else {
+                                    m.updateAvailable = true
+                                    m.status = "Ada update! (${r.different.size} dari ${r.total} file berbeda)"
+                                    AppLog.i("${m.displayName}: file berbeda ${r.different.take(15)}")
+                                }
+                            } catch (e: Exception) {
+                                AppLog.e("Cek isi ${m.workshopId} (${m.displayName}) gagal", e)
+                                m.updateAvailable = false
+                                m.status = "Gagal cek isi: ${e.message ?: e.javaClass.simpleName}"
+                            }
+                            store.save(mods)
+                            renderList()
                         }
                     }
                 }
                 store.save(mods)
                 setBusy(false)
-                toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod punya update")
+                val updates = targets.count { it.updateAvailable }
+                toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod perlu diupdate")
             } catch (e: Exception) {
                 AppLog.e("Gagal cek update", e)
                 setBusy(false)
@@ -512,6 +560,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /** Bandingkan file mod lokal dengan daftar file resmi (manifest) dari Steam. */
+    private suspend fun compareContent(m: ModEntry, onProgress: (String) -> Unit): ModFiles.CompareResult =
+        withContext(Dispatchers.IO) {
+            val work = File(cacheDir, "mf/${m.workshopId}")
+            work.deleteRecursively()
+            work.mkdirs()
+            try {
+                val remote = SteamManager.fetchManifest(this@MainActivity, m.workshopId.toLong(), work) {}
+                if (remote.isEmpty()) throw Exception("Daftar file dari Steam kosong")
+                AppLog.i("Manifest ${m.workshopId}: ${remote.size} file")
+                when (m.sourceType) {
+                    "folder" -> {
+                        val dir = ModFiles.resolveFolder(this@MainActivity, m)
+                            ?: throw Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+                        ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
+                    }
+                    "zip" -> ModFiles.compareZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, remote, onProgress)
+                    else -> throw Exception("Tidak ada file lokal untuk dibandingkan")
+                }
+            } finally {
+                work.deleteRecursively()
+            }
+        }
 
     // ------------------------------------------------------------------ update
 
@@ -574,8 +646,15 @@ class MainActivity : AppCompatActivity() {
         work.deleteRecursively()
         work.mkdirs()
         try {
+            if (m.remoteVersion.isEmpty()) {
+                WorkshopApi.getDetails(listOf(m.workshopId))[m.workshopId]?.let {
+                    m.remoteVersion = it.contentId
+                    m.remoteTime = it.timeUpdated
+                    if (m.remoteTitle == null) m.remoteTitle = it.title
+                }
+            }
             onProgress("Download dari Steam…")
-            SteamManager.downloadMod(m.workshopId.toLong(), work, onProgress)
+            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, onProgress)
             ModFiles.ensurePublishedId(work, m.workshopId)
 
             when (m.sourceType) {
@@ -596,6 +675,7 @@ class MainActivity : AppCompatActivity() {
             }
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)
             m.updateAvailable = false
+            m.installedVersion = m.remoteVersion
             AppLog.i("Berhasil update ${m.workshopId} (${m.displayName})")
             m.status = "Berhasil diupdate ✓ (${fmt(m.remoteTime)})"
         } finally {

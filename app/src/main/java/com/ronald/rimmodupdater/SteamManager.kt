@@ -268,13 +268,34 @@ object SteamManager {
         accountName = null
     }
 
-    /**
-     * Download 1 mod Workshop ke [dir] (folder kosong di penyimpanan internal aplikasi).
-     * Melempar exception kalau gagal atau macet terlalu lama.
-     */
-    suspend fun downloadMod(workshopId: Long, dir: File, onStatus: (String) -> Unit) = withContext(Dispatchers.IO) {
+    /** Download 1 mod Workshop ke [dir] (folder kosong di penyimpanan internal aplikasi). */
+    suspend fun downloadMod(ctx: Context, workshopId: Long, dir: File, onStatus: (String) -> Unit) {
+        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus)
+        val count = ModFiles.downloadedFiles(dir).size
+        AppLog.i("Download $workshopId selesai: $count file")
+        if (count == 0) {
+            throw Exception("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.")
+        }
+    }
+
+    /** Ambil daftar file resmi (manifest) sebuah mod tanpa men-download isinya. */
+    suspend fun fetchManifest(ctx: Context, workshopId: Long, dir: File, onStatus: (String) -> Unit): List<ModFiles.RemoteFile> {
+        runDepot(ctx, workshopId, dir, manifestOnly = true, onStatus = onStatus)
+        val txt = dir.listFiles()?.firstOrNull { it.name.startsWith("manifest_") && it.name.endsWith(".txt") }
+            ?: throw Exception("Daftar file mod tidak didapat dari Steam")
+        return ModFiles.parseManifest(txt)
+    }
+
+    private suspend fun runDepot(
+        ctx: Context,
+        workshopId: Long,
+        dir: File,
+        manifestOnly: Boolean,
+        onStatus: (String) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        // Sambung ulang otomatis (pakai token tersimpan) kalau koneksi sempat putus.
+        if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
         val c = client ?: throw LoginRequired()
-        if (!loggedIn) throw LoginRequired()
 
         val done = CompletableDeferred<Unit>()
         val activity = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
@@ -324,22 +345,19 @@ object SteamManager {
                     installToGameNameDirectory = false,
                     installDirectory = dir.absolutePath,
                     verify = false,
-                    downloadManifestOnly = false,
+                    downloadManifestOnly = manifestOnly,
                 )
             )
             dd.finishAdding()
-            // Tunggu selesai, tapi gagal kalau 3 menit tidak ada kemajuan sama sekali.
+            // Tunggu selesai, tapi gagal kalau terlalu lama tidak ada kemajuan.
+            val limit = if (manifestOnly) 90_000L else 180_000L
             while (!done.isCompleted) {
-                delay(500)
-                if (System.currentTimeMillis() - activity.get() > 180_000) {
-                    throw Exception("Download macet (tidak ada kemajuan 3 menit)")
+                delay(300)
+                if (System.currentTimeMillis() - activity.get() > limit) {
+                    throw Exception("Steam tidak merespons (macet ${limit / 1000} detik)")
                 }
             }
             done.await()
-            AppLog.i("Download $workshopId selesai: ${ModFiles.downloadedFiles(dir).size} file")
-            if (ModFiles.downloadedFiles(dir).isEmpty()) {
-                throw Exception("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.")
-            }
         } finally {
             try {
                 dd.close()

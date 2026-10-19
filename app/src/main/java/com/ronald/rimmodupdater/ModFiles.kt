@@ -2,8 +2,11 @@ package com.ronald.rimmodupdater
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
+import java.io.InputStream
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -175,6 +178,118 @@ object ModFiles {
                 zos.closeEntry()
             }
         }
+    }
+
+    // ---------------------------------------------------------------- bandingkan isi
+
+    data class RemoteFile(val path: String, val size: Long, val sha1: String)
+
+    data class CompareResult(val total: Int, val different: List<String>) {
+        val same: Boolean get() = different.isEmpty()
+    }
+
+    /** Batas ukuran file yang dicek hash-nya (file lebih besar cukup dicek ukurannya). */
+    private const val HASH_LIMIT = 4L * 1024 * 1024
+
+    /** Baca file manifest_*.txt buatan DepotDownloader. */
+    fun parseManifest(txt: File): List<RemoteFile> {
+        val line = Regex("""^\s*(\d+)\s+(\d+)\s+([0-9a-f]{40})\s+([0-9a-f]+)\s+(.+)$""")
+        return txt.readLines().mapNotNull { l ->
+            val m = line.find(l) ?: return@mapNotNull null
+            val flags = m.groupValues[4].toInt(16)
+            if (flags and 0x40 != 0) return@mapNotNull null // folder
+            RemoteFile(
+                path = m.groupValues[5].trim().replace('\\', '/'),
+                size = m.groupValues[1].toLong(),
+                sha1 = m.groupValues[3],
+            )
+        }
+    }
+
+    private fun sha1(input: InputStream): String {
+        val md = MessageDigest.getInstance("SHA-1")
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            md.update(buf, 0, n)
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** Daftar semua file di folder mod (cepat, langsung lewat DocumentsContract). */
+    private fun listTree(ctx: Context, treeUri: Uri, docId: String, prefix: String, out: MutableMap<String, Pair<Uri, Long>>) {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        val cols = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        ctx.contentResolver.query(children, cols, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(0)
+                val name = c.getString(1) ?: continue
+                val mime = c.getString(2)
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (name != ".DepotDownloader") listTree(ctx, treeUri, id, "$prefix$name/", out)
+                } else {
+                    out["$prefix$name"] = DocumentsContract.buildDocumentUriUsingTree(treeUri, id) to c.getLong(3)
+                }
+            }
+        }
+    }
+
+    fun compareFolder(ctx: Context, dir: DocumentFile, remote: List<RemoteFile>, onProgress: (String) -> Unit): CompareResult {
+        val local = mutableMapOf<String, Pair<Uri, Long>>()
+        listTree(ctx, dir.uri, DocumentsContract.getDocumentId(dir.uri), "", local)
+        val lower = local.entries.associate { it.key.lowercase() to it.value }
+        val diff = mutableListOf<String>()
+        remote.forEachIndexed { i, rf ->
+            val l = local[rf.path] ?: lower[rf.path.lowercase()]
+            when {
+                l == null -> diff += "${rf.path} (tidak ada)"
+                l.second != rf.size -> diff += "${rf.path} (ukuran beda)"
+                rf.size in 1..HASH_LIMIT -> {
+                    if (i % 10 == 0) onProgress("Memeriksa file ${i + 1}/${remote.size}")
+                    val h = ctx.contentResolver.openInputStream(l.first)?.use { sha1(it) }
+                    if (h != rf.sha1) diff += "${rf.path} (isi beda)"
+                }
+            }
+        }
+        return CompareResult(remote.size, diff)
+    }
+
+    fun compareZip(ctx: Context, zipUri: Uri, prefix: String, remote: List<RemoteFile>, onProgress: (String) -> Unit): CompareResult {
+        val byPath = remote.associateBy { it.path.lowercase() }
+        val seen = mutableSetOf<String>()
+        val diff = mutableListOf<String>()
+        ctx.contentResolver.openInputStream(zipUri)?.use { input ->
+            ZipInputStream(input.buffered()).use { zis ->
+                var n = 0
+                while (true) {
+                    val e = zis.nextEntry ?: break
+                    if (e.isDirectory) continue
+                    val name = e.name.replace('\\', '/')
+                    if (!name.startsWith(prefix)) continue
+                    val key = name.removePrefix(prefix).lowercase()
+                    val rf = byPath[key] ?: continue
+                    seen += key
+                    if (++n % 10 == 0) onProgress("Memeriksa file $n/${remote.size}")
+                    val counting = object : java.io.FilterInputStream(zis) {
+                        var count = 0L
+                        override fun read(b: ByteArray, off: Int, len: Int): Int =
+                            super.read(b, off, len).also { if (it > 0) count += it }
+                        override fun close() {}
+                    }
+                    val h = sha1(counting)
+                    if (counting.count != rf.size) diff += "${rf.path} (ukuran beda)"
+                    else if (rf.size > 0 && h != rf.sha1) diff += "${rf.path} (isi beda)"
+                }
+            }
+        } ?: throw Exception("Tidak bisa membuka zip")
+        remote.filter { it.path.lowercase() !in seen }.forEach { diff += "${it.path} (tidak ada)" }
+        return CompareResult(remote.size, diff)
     }
 
     fun safeFolderName(name: String, id: String): String {

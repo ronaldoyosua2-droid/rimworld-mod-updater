@@ -22,6 +22,10 @@ data class ModEntry(
     var remoteTitle: String? = null,
     var status: String = "Belum dicek",
     var updateAvailable: Boolean = false,
+    /** Versi konten Workshop yang terpasang ("" = belum diketahui). */
+    var installedVersion: String = "",
+    /** Versi konten terbaru di Workshop. */
+    var remoteVersion: String = "",
 ) {
     val displayName: String get() = remoteTitle?.takeIf { it.isNotBlank() } ?: name
 
@@ -37,6 +41,8 @@ data class ModEntry(
         put("remoteTitle", remoteTitle ?: "")
         put("status", status)
         put("updateAvailable", updateAvailable)
+        put("installedVersion", installedVersion)
+        put("remoteVersion", remoteVersion)
     }
 
     companion object {
@@ -52,6 +58,8 @@ data class ModEntry(
             remoteTitle = o.optString("remoteTitle").ifBlank { null },
             status = o.optString("status", "Belum dicek"),
             updateAvailable = o.optBoolean("updateAvailable"),
+            installedVersion = o.optString("installedVersion"),
+            remoteVersion = o.optString("remoteVersion"),
         )
     }
 }
