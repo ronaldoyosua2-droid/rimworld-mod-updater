@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.time.ZoneId
+import java.util.Properties
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -23,11 +24,23 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"$buildTime WIB\"")
     }
 
+    // Kunci tanda tangan tetap, supaya build baru bisa meng-update aplikasi yang sudah terpasang.
+    val signProps = Properties().apply {
+        rootProject.file("signing/keystore.properties").inputStream().use { load(it) }
+    }
+    signingConfigs {
+        create("fixed") {
+            storeFile = rootProject.file("signing/release.jks")
+            storePassword = signProps.getProperty("storePassword")
+            keyAlias = signProps.getProperty("keyAlias")
+            keyPassword = signProps.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Ditandatangani dengan debug key supaya APK bisa langsung di-install.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 
