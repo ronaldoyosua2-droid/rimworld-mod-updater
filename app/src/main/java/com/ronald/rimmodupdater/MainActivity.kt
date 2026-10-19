@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -48,6 +49,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var steamStatus: TextView
     private lateinit var steamButton: MaterialButton
     private lateinit var progressText: TextView
+    private lateinit var progressRow: LinearLayout
+    private lateinit var progressBar: LinearProgressIndicator
+    private lateinit var percentText: TextView
+    @Volatile private var lastPercent = -1
     private lateinit var listContainer: LinearLayout
     private val actionButtons = mutableListOf<View>()
 
@@ -176,6 +181,30 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(progressText)
 
+        progressBar = LinearProgressIndicator(this).apply {
+            isIndeterminate = true
+            max = 100
+            trackCornerRadius = px(4)
+            trackThickness = px(8)
+        }
+        percentText = TextView(this).apply {
+            textSize = 13f
+            setTypeface(typeface, Typeface.BOLD)
+            minWidth = px(44)
+            gravity = Gravity.END
+        }
+        progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(0, 0, 0, px(8))
+            addView(progressBar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(percentText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = px(8)
+            })
+        }
+        root.addView(progressRow)
+
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(listContainer) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -192,6 +221,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun setBusy(b: Boolean, msg: String? = null) {
         busy = b
+        progressRow.visibility = if (b) View.VISIBLE else View.GONE
+        lastPercent = -2
+        setFraction(null)
         actionButtons.forEach { it.isEnabled = !b }
         steamButton.isEnabled = !b
         showProgress(msg)
@@ -204,6 +236,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun progress(msg: String) = runOnUiThread { showProgress(msg) }
+
+    /** Atur bar persentase (0..1). null = berjalan tanpa persen. */
+    private fun setFraction(f: Float?) {
+        val pct = f?.let { (it.coerceIn(0f, 1f) * 100).toInt() } ?: -1
+        if (pct == lastPercent) return
+        lastPercent = pct
+        runOnUiThread {
+            if (pct < 0) {
+                if (!progressBar.isIndeterminate) {
+                    progressBar.visibility = View.INVISIBLE
+                    progressBar.isIndeterminate = true
+                    progressBar.visibility = View.VISIBLE
+                }
+                percentText.text = ""
+            } else {
+                if (progressBar.isIndeterminate) {
+                    progressBar.visibility = View.INVISIBLE
+                    progressBar.isIndeterminate = false
+                    progressBar.visibility = View.VISIBLE
+                }
+                progressBar.setProgressCompat(pct, true)
+                percentText.text = "$pct%"
+            }
+        }
+    }
 
     private fun toast(msg: String) {
         AppLog.i("Pesan: $msg")
@@ -533,7 +590,13 @@ class MainActivity : AppCompatActivity() {
                         // 1) Ambil semua daftar file sekaligus dalam satu sesi Steam (jauh lebih cepat).
                         val mfDir = File(cacheDir, "mf")
                         val manifests = try {
-                            SteamManager.fetchManifests(this@MainActivity, needContent.map { it.workshopId.toLong() }, mfDir) { progress(it) }
+                            SteamManager.fetchManifests(
+                                this@MainActivity,
+                                needContent.map { it.workshopId.toLong() },
+                                mfDir,
+                                onStatus = { progress(it) },
+                                onFraction = { setFraction(it * 0.5f) },
+                            )
                         } catch (e: Exception) {
                             AppLog.e("Ambil daftar file gagal", e)
                             emptyMap()
@@ -542,6 +605,7 @@ class MainActivity : AppCompatActivity() {
                         needContent.forEachIndexed { i, m ->
                             val prefix = "Cek isi [${i + 1}/${needContent.size}] ${m.displayName}: "
                             progress(prefix + "membandingkan file…")
+                            setFraction(0.5f + 0.5f * i / needContent.size)
                             try {
                                 val remote = manifests[m.workshopId.toLong()]?.getOrThrow()
                                     ?: throw Exception("daftar file tidak didapat dari Steam")
@@ -635,7 +699,7 @@ class MainActivity : AppCompatActivity() {
                 val prefix = "[${i + 1}/${list.size}] ${m.displayName}: "
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
-                    updateOne(m) { progress(prefix + it) }
+                    updateOne(m, { progress(prefix + it) }) { f -> setFraction((i + f) / list.size) }
                     ok++
                 } catch (e: SteamManager.LoginRequired) {
                     m.status = "Gagal: perlu login Steam lagi"
@@ -654,7 +718,11 @@ class MainActivity : AppCompatActivity() {
     private fun outputRoot(): DocumentFile? =
         store.outputTreeUri?.let { DocumentFile.fromTreeUri(this, Uri.parse(it)) }?.takeIf { it.canWrite() }
 
-    private suspend fun updateOne(m: ModEntry, onProgress: (String) -> Unit) = withContext(Dispatchers.IO) {
+    private suspend fun updateOne(
+        m: ModEntry,
+        onProgress: (String) -> Unit,
+        onFraction: (Float) -> Unit,
+    ) = withContext(Dispatchers.IO) {
         val work = File(cacheDir, "dl/${m.workshopId}")
         work.deleteRecursively()
         work.mkdirs()
@@ -667,7 +735,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             onProgress("Download dari Steam…")
-            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, onProgress)
+            // Download = 0..80%, salin ke folder = 80..100%
+            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, onProgress) { onFraction(it * 0.8f) }
+            val copyFrac: (Float) -> Unit = { onFraction(0.8f + it * 0.2f) }
             ModFiles.ensurePublishedId(work, m.workshopId)
 
             when (m.sourceType) {
@@ -675,15 +745,15 @@ class MainActivity : AppCompatActivity() {
                     val target = ModFiles.resolveFolder(this@MainActivity, m)
                         ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
                     if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
-                    ModFiles.replaceFolder(this@MainActivity, target, work, onProgress)
+                    ModFiles.replaceFolder(this@MainActivity, target, work, onProgress, copyFrac)
                 }
                 "zip" -> {
-                    ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, onProgress)
+                    ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, onProgress, copyFrac)
                 }
                 else -> {
                     val out = outputRoot() ?: throw Exception("Folder hasil belum dipilih")
                     val folderName = ModFiles.safeFolderName(m.displayName, m.workshopId)
-                    ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, onProgress)
+                    ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, onProgress, copyFrac)
                 }
             }
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)

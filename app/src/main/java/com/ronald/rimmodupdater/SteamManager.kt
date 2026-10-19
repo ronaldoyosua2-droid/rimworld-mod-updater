@@ -292,8 +292,14 @@ object SteamManager {
     }
 
     /** Download 1 mod Workshop ke [dir] (folder kosong di penyimpanan internal aplikasi). */
-    suspend fun downloadMod(ctx: Context, workshopId: Long, dir: File, onStatus: (String) -> Unit) {
-        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus)
+    suspend fun downloadMod(
+        ctx: Context,
+        workshopId: Long,
+        dir: File,
+        onStatus: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
+    ) {
+        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus, onFraction = onFraction)
         val count = ModFiles.downloadedFiles(dir).size
         AppLog.i("Download $workshopId selesai: $count file")
         if (count == 0) {
@@ -344,12 +350,16 @@ object SteamManager {
         ids: List<Long>,
         baseDir: File,
         onStatus: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
     ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
         val all = ids.distinct()
         val started = System.currentTimeMillis()
         val doneCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val report: () -> Unit = { onStatus("Ambil daftar file dari Steam: ${doneCount.get()}/${all.size} mod") }
+        val report: () -> Unit = {
+            onStatus("Ambil daftar file dari Steam: ${doneCount.get()}/${all.size} mod")
+            onFraction(doneCount.get().toFloat() / all.size.coerceAtLeast(1))
+        }
         report()
         // Bagi ke beberapa jalur yang berjalan bersamaan (round-robin supaya mod besar tersebar).
         val lanes = minOf(4, all.size).coerceAtLeast(1)
@@ -456,6 +466,7 @@ object SteamManager {
         dir: File,
         manifestOnly: Boolean,
         onStatus: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
     ) = withContext(Dispatchers.IO) {
         // Sambung ulang otomatis (pakai token tersimpan) kalau koneksi sempat putus.
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
@@ -491,11 +502,13 @@ object SteamManager {
 
             override fun onFileCompleted(depotId: Int, fileName: String, depotPercentComplete: Float) {
                 activity.set(System.currentTimeMillis())
-                onStatus("${(depotPercentComplete * 100).toInt()}% • $fileName")
+                onStatus("Download: $fileName")
+                onFraction(depotPercentComplete)
             }
 
             override fun onChunkCompleted(depotId: Int, depotPercentComplete: Float, compressedBytes: Long, uncompressedBytes: Long) {
                 activity.set(System.currentTimeMillis())
+                onFraction(depotPercentComplete)
             }
         })
         dd.getCompletion().whenComplete { _, err ->

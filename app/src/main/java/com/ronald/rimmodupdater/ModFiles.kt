@@ -133,26 +133,47 @@ object ModFiles {
     }
 
     /** Ganti isi folder mod lama dengan versi baru. */
-    fun replaceFolder(ctx: Context, target: DocumentFile, src: File, onProgress: (String) -> Unit) {
+    fun replaceFolder(
+        ctx: Context,
+        target: DocumentFile,
+        src: File,
+        onProgress: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
+    ) {
         onProgress("Menghapus file lama…")
         target.listFiles().forEach { it.delete() }
-        copyInto(ctx, target, src, src, onProgress)
+        copyInto(ctx, target, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
     }
 
     /** Taruh mod baru sebagai folder baru di folder hasil. */
-    fun writeNewFolder(ctx: Context, outRoot: DocumentFile, folderName: String, src: File, onProgress: (String) -> Unit): DocumentFile {
+    fun writeNewFolder(
+        ctx: Context,
+        outRoot: DocumentFile,
+        folderName: String,
+        src: File,
+        onProgress: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
+    ): DocumentFile {
         outRoot.listFiles().firstOrNull { it.name == folderName }?.delete()
         val dir = outRoot.createDirectory(folderName) ?: throw Exception("Tidak bisa membuat folder $folderName")
-        copyInto(ctx, dir, src, src, onProgress)
+        copyInto(ctx, dir, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
         return dir
     }
 
-    private fun copyInto(ctx: Context, target: DocumentFile, srcDir: File, root: File, onProgress: (String) -> Unit) {
+    private class Counter(val total: Int, val onFraction: (Float) -> Unit) {
+        var done = 0
+        fun tick() {
+            done++
+            onFraction(done.toFloat() / total.coerceAtLeast(1))
+        }
+    }
+
+    private fun copyInto(ctx: Context, target: DocumentFile, srcDir: File, root: File, onProgress: (String) -> Unit, counter: Counter) {
         srcDir.listFiles()?.sortedBy { it.name }?.forEach { f ->
             if (f.isDirectory) {
                 if (f.name == ".DepotDownloader") return@forEach
                 val sub = target.createDirectory(f.name) ?: throw Exception("Gagal membuat folder ${f.name}")
-                copyInto(ctx, sub, f, root, onProgress)
+                copyInto(ctx, sub, f, root, onProgress, counter)
             } else {
                 onProgress("Menyalin ${f.relativeTo(root).path}")
                 val doc = target.createFile("application/octet-stream", f.name)
@@ -160,22 +181,31 @@ object ModFiles {
                 ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
                     f.inputStream().use { it.copyTo(out) }
                 } ?: throw Exception("Gagal menulis ${f.name}")
+                counter.tick()
             }
         }
     }
 
     /** Tulis ulang file zip lama dengan isi versi baru (struktur folder di dalam zip dipertahankan). */
-    fun rewriteZip(ctx: Context, zipUri: Uri, prefix: String, src: File, onProgress: (String) -> Unit) {
+    fun rewriteZip(
+        ctx: Context,
+        zipUri: Uri,
+        prefix: String,
+        src: File,
+        onProgress: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
+    ) {
         val files = downloadedFiles(src)
         val out = ctx.contentResolver.openOutputStream(zipUri, "wt")
             ?: throw Exception("Tidak bisa menulis ke file zip")
         ZipOutputStream(out.buffered()).use { zos ->
-            files.forEach { f ->
+            files.forEachIndexed { idx, f ->
                 val rel = f.relativeTo(src).path.replace('\\', '/')
                 onProgress("Mengemas $rel")
                 zos.putNextEntry(ZipEntry(prefix + rel).apply { time = f.lastModified() })
                 f.inputStream().use { it.copyTo(zos) }
                 zos.closeEntry()
+                onFraction((idx + 1).toFloat() / files.size.coerceAtLeast(1))
             }
         }
     }
