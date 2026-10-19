@@ -60,6 +60,7 @@ object SteamManager {
         m.subscribe(ConnectedCallback::class.java) { connectedSignal?.complete(Unit) }
         m.subscribe(DisconnectedCallback::class.java) {
             loggedIn = false
+            AppLog.w("Terputus dari Steam")
             val err = Exception("Koneksi ke Steam terputus")
             connectedSignal?.completeExceptionally(err)
             logonSignal?.completeExceptionally(err)
@@ -93,6 +94,7 @@ object SteamManager {
         if (c.isConnected) return
         val sig = CompletableDeferred<Unit>()
         connectedSignal = sig
+        AppLog.i("Menghubungkan ke Steam…")
         c.connect()
         withTimeout(30_000) { sig.await() }
     }
@@ -109,6 +111,7 @@ object SteamManager {
             loginID = 0x52444D55 // nilai unik supaya tidak bentrok dengan sesi Steam lain
         })
         val result = withTimeout(30_000) { logon.await() }
+        AppLog.i("Logon Steam ($account): $result")
         if (result == EResult.OK) {
             withTimeout(30_000) { lic.await() }
             loggedIn = true
@@ -176,7 +179,7 @@ object SteamManager {
         val dd = DepotDownloader(
             steamClient = c,
             licenses = licenses,
-            debug = false,
+            debug = true,
             useLanCache = false,
             maxDownloads = 4,
             maxDecompress = 2,
@@ -188,6 +191,7 @@ object SteamManager {
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
+                AppLog.e("DepotDownloader gagal untuk $workshopId", error)
                 done.completeExceptionally(error)
             }
 
@@ -229,6 +233,7 @@ object SteamManager {
                 }
             }
             done.await()
+            AppLog.i("Download $workshopId selesai: ${ModFiles.downloadedFiles(dir).size} file")
             if (ModFiles.downloadedFiles(dir).isEmpty()) {
                 throw Exception("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.")
             }

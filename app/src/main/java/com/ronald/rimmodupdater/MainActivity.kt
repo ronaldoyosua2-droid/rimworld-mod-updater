@@ -17,6 +17,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.documentfile.provider.DocumentFile
@@ -79,11 +80,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(this)
         store = ModStore(this)
         mods.addAll(store.load())
         buildUi()
         refreshSteamStatus()
         renderList()
+        AppLog.takeLastCrash()?.let { crash ->
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Aplikasi sempat crash")
+                .setMessage("Sebelumnya aplikasi tertutup karena error. Kirim log ke Claude supaya bisa diperbaiki?\n\n" + crash.take(600))
+                .setPositiveButton("Kirim log") { _, _ -> shareLog() }
+                .setNegativeButton("Nanti", null)
+                .show()
+        }
     }
 
     private fun persist(uri: Uri) {
@@ -130,7 +140,7 @@ class MainActivity : AppCompatActivity() {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Tambahkan mod lama, cek versi terbaru di Workshop, lalu tekan Update."
+            text = "${AppLog.buildLabel}\nTambahkan mod lama, cek versi terbaru di Workshop, lalu tekan Update."
             textSize = 13f
             alpha = 0.75f
             setPadding(0, px(2), 0, px(10))
@@ -143,6 +153,8 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             addView(steamStatus, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(steamButton)
+            addView(button("Log") { showLogDialog() }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = px(6) })
         })
 
         val bFolder = button("+ Folder mod") { pickFolder.launch(null) }
@@ -191,7 +203,49 @@ class MainActivity : AppCompatActivity() {
 
     private fun progress(msg: String) = runOnUiThread { showProgress(msg) }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    private fun toast(msg: String) {
+        AppLog.i("Pesan: $msg")
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
+
+    // ------------------------------------------------------------------ log
+
+    private fun showLogDialog() {
+        val text = AppLog.recentImportant().ifBlank { "(log masih kosong)" }
+        val tv = TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(px(16), px(8), px(16), px(8))
+        }
+        val scroll = ScrollView(this).apply { addView(tv) }
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Log • ${AppLog.buildLabel}")
+            .setView(scroll)
+            .setPositiveButton("Kirim log") { _, _ -> shareLog() }
+            .setNeutralButton("Hapus log") { _, _ -> AppLog.clear(); toast("Log dihapus") }
+            .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    private fun shareLog() {
+        try {
+            val f = AppLog.exportFile(this)
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "Log RimMod Updater ${AppLog.buildLabel}")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Kirim log ke…"))
+        } catch (e: Exception) {
+            AppLog.e("Gagal membagikan log", e)
+            Toast.makeText(this, "Gagal membagikan log: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
 
@@ -302,6 +356,7 @@ class MainActivity : AppCompatActivity() {
                     toast("${found.size} mod ditambahkan")
                 }
             } catch (e: Exception) {
+                AppLog.e("Gagal membaca folder $uri", e)
                 toast("Gagal membaca folder: ${e.message}")
             }
             setBusy(false)
@@ -341,6 +396,7 @@ class MainActivity : AppCompatActivity() {
                     ))
                     added++
                 } catch (e: Exception) {
+                    AppLog.e("Gagal membaca zip $uri", e)
                     toast("Gagal membaca zip: ${e.message}")
                 }
             }
@@ -420,6 +476,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             setBusy(true, "Mengecek ${targets.size} mod di Steam Workshop…")
             try {
+                AppLog.i("Cek update ${targets.size} mod")
                 val details = withContext(Dispatchers.IO) { WorkshopApi.getDetails(targets.map { it.workshopId }) }
                 var updates = 0
                 targets.forEach { m ->
@@ -451,6 +508,7 @@ class MainActivity : AppCompatActivity() {
                 setBusy(false)
                 toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod punya update")
             } catch (e: Exception) {
+                AppLog.e("Gagal cek update", e)
                 setBusy(false)
                 toast("Gagal cek: ${e.message}. Cek koneksi internet.")
             }
@@ -492,12 +550,14 @@ class MainActivity : AppCompatActivity() {
             var ok = 0
             list.forEachIndexed { i, m ->
                 val prefix = "[${i + 1}/${list.size}] ${m.displayName}: "
+                AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
                     updateOne(m) { progress(prefix + it) }
                     ok++
                 } catch (e: SteamManager.LoginRequired) {
                     m.status = "Gagal: perlu login Steam lagi"
                 } catch (e: Exception) {
+                    AppLog.e("Update ${m.workshopId} (${m.displayName}) gagal", e)
                     m.status = "Gagal: ${e.message ?: e.javaClass.simpleName}"
                 }
                 store.save(mods)
@@ -538,6 +598,7 @@ class MainActivity : AppCompatActivity() {
             }
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)
             m.updateAvailable = false
+            AppLog.i("Berhasil update ${m.workshopId} (${m.displayName})")
             m.status = "Berhasil diupdate ✓ (${fmt(m.remoteTime)})"
         } finally {
             work.deleteRecursively()
@@ -579,6 +640,7 @@ class MainActivity : AppCompatActivity() {
             return true
         } catch (_: SteamManager.LoginRequired) {
         } catch (e: Exception) {
+            AppLog.e("Tidak bisa tersambung ke Steam", e)
             toast("Tidak bisa tersambung ke Steam: ${e.message}")
             return false
         }
@@ -592,6 +654,7 @@ class MainActivity : AppCompatActivity() {
                 return true
             } catch (e: Exception) {
                 val cause = (e.cause ?: e)
+                AppLog.e("Login Steam gagal", e)
                 if (cause is CancellationException) return false
                 toast("Login gagal: ${cause.message ?: cause.javaClass.simpleName}")
             }

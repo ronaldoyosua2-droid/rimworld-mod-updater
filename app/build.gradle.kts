@@ -15,6 +15,9 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        val buildTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Jakarta"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm"))
+        buildConfigField("String", "BUILD_TIME", "\"$buildTime WIB\"")
     }
 
     buildTypes {
@@ -23,6 +26,10 @@ android {
             // Ditandatangani dengan debug key supaya APK bisa langsung di-install.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
