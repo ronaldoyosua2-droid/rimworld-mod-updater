@@ -817,15 +817,23 @@ class MainActivity : AppCompatActivity() {
                 m.workshopId.toLong(),
                 work,
                 onStatus = {},
-                onFraction = { f -> onFraction(f * 0.8f) },
-                onChunk = { b ->
-                    bytes.addAndGet(b)
-                    panel.log("CHUNK", "#${chunks.incrementAndGet()}  ${fmtSize(b)} → zstd", "✓")
+                onFraction = { f ->
+                    onFraction(f * 0.8f)
+                    // Ukuran terunduh dihitung dari persentase (info byte per chunk tidak selalu dikirim library).
+                    if (size > 0) bytes.accumulateAndGet((f.coerceIn(0f, 1f) * size).toLong()) { x, y -> maxOf(x, y) }
+                    dlStats()
+                },
+                onChunk = { cumulative ->
+                    // nilai dari library = total kumulatif depot, bukan per chunk
+                    val prev = bytes.getAndAccumulate(cumulative) { x, y -> maxOf(x, y) }
+                    val delta = (cumulative - prev).coerceAtLeast(0)
+                    panel.log("CHUNK", "#${chunks.incrementAndGet()}  +${fmtSize(delta)} → zstd", "✓")
                     dlStats()
                 },
                 onFile = { name ->
                     files.incrementAndGet()
-                    panel.log("FILE", name, "✓")
+                    val rel = name.substringAfter(work.absolutePath).trimStart('/', '\\')
+                    panel.log("FILE", rel.ifBlank { name.substringAfterLast('/') }, "✓")
                     dlStats()
                 },
             )
