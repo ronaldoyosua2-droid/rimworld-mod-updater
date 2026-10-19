@@ -17,6 +17,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
@@ -164,6 +166,13 @@ class MainActivity : AppCompatActivity() {
         root.addView(ScrollView(this).apply { addView(listContainer) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // Android 15+ menggambar sampai ke balik status bar & tombol navigasi: beri jarak sesuai insets.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(px(16) + bars.left, px(12) + bars.top, px(16) + bars.right, px(8) + maxOf(bars.bottom, ime.bottom))
+            insets
+        }
         setContentView(root)
     }
 
