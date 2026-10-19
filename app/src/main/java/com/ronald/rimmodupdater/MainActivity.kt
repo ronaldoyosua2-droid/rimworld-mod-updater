@@ -36,6 +36,9 @@ import java.util.Locale
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.resume
 
+/** Penanda: isi mod lokal sudah dibandingkan dan ternyata versi lama. */
+private const val OUTDATED = "outdated"
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var store: ModStore
@@ -285,7 +288,8 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(TextView(this).apply {
             val ver = when {
-                m.installedVersion.isEmpty() -> "belum dicek isinya"
+                m.installedVersion.isEmpty() -> "belum diketahui (tekan Cek update)"
+                m.installedVersion == OUTDATED -> "lebih lama dari Workshop"
                 m.remoteVersion.isEmpty() || m.installedVersion == m.remoteVersion -> "sama dengan Workshop"
                 else -> "lebih lama dari Workshop"
             }
@@ -549,6 +553,8 @@ class MainActivity : AppCompatActivity() {
                                     m.status = "Terbaru ✓ (isi sama dengan Workshop)"
                                 } else {
                                     m.updateAvailable = true
+                                    // Tandai versi lama, supaya cek berikutnya tidak perlu bandingkan isi lagi.
+                                    m.installedVersion = OUTDATED
                                     m.status = "Ada update! (${r.different.size} dari ${r.total} file berbeda)"
                                     AppLog.i("${m.displayName}: file berbeda ${r.different.take(15)}")
                                 }
