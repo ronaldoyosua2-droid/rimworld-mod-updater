@@ -188,8 +188,15 @@ object ModFiles {
         val same: Boolean get() = different.isEmpty()
     }
 
-    /** Batas ukuran file yang dicek hash-nya (file lebih besar cukup dicek ukurannya). */
-    private const val HASH_LIMIT = 4L * 1024 * 1024
+    /**
+     * File kode/data (xml, dll, dll.) dicek hash-nya karena perubahan kecil bisa tidak mengubah ukuran.
+     * File aset besar (gambar, suara) cukup dicek ukurannya supaya cepat.
+     */
+    private val HASH_EXT = setOf("xml", "dll", "txt", "json", "cs", "xaml", "lua", "csv", "ini", "cfg")
+    private const val HASH_LIMIT = 8L * 1024 * 1024
+
+    private fun needsHash(rf: RemoteFile): Boolean =
+        rf.size in 1..HASH_LIMIT && rf.path.substringAfterLast('.', "").lowercase() in HASH_EXT
 
     /** Baca file manifest_*.txt buatan DepotDownloader. */
     fun parseManifest(txt: File): List<RemoteFile> {
@@ -250,7 +257,7 @@ object ModFiles {
             when {
                 l == null -> diff += "${rf.path} (tidak ada)"
                 l.second != rf.size -> diff += "${rf.path} (ukuran beda)"
-                rf.size in 1..HASH_LIMIT -> {
+                needsHash(rf) -> {
                     if (i % 10 == 0) onProgress("Memeriksa file ${i + 1}/${remote.size}")
                     val h = ctx.contentResolver.openInputStream(l.first)?.use { sha1(it) }
                     if (h != rf.sha1) diff += "${rf.path} (isi beda)"
@@ -275,7 +282,11 @@ object ModFiles {
                     val key = name.removePrefix(prefix).lowercase()
                     val rf = byPath[key] ?: continue
                     seen += key
-                    if (++n % 10 == 0) onProgress("Memeriksa file $n/${remote.size}")
+                    if (++n % 25 == 0) onProgress("Memeriksa file $n/${remote.size}")
+                    if (!needsHash(rf) && e.size >= 0) {
+                        if (e.size != rf.size) diff += "${rf.path} (ukuran beda)"
+                        continue
+                    }
                     val counting = object : java.io.FilterInputStream(zis) {
                         var count = 0L
                         override fun read(b: ByteArray, off: Int, len: Int): Int =

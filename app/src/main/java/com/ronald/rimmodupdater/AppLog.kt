@@ -23,6 +23,16 @@ object AppLog {
     private lateinit var crashFile: File
     private val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var ready = false
+    private var writer: java.io.Writer? = null
+    private var written = 0L
+
+    @Synchronized
+    fun flush() {
+        try {
+            writer?.flush()
+        } catch (_: Exception) {
+        }
+    }
 
     val buildLabel: String
         get() = "Build ${BuildConfig.VERSION_CODE} (v${BuildConfig.VERSION_NAME}, ${BuildConfig.BUILD_TIME})"
@@ -41,6 +51,7 @@ object AppLog {
             try {
                 val text = "CRASH di thread '${t.name}'\n${stack(e)}"
                 write("FATAL", text)
+                flush()
                 crashFile.writeText("${timeFmt.format(Date())}\n$text")
             } catch (_: Throwable) {
             }
@@ -72,11 +83,21 @@ object AppLog {
         Log.println(if (level == "info" || level == "steam") Log.INFO else Log.ERROR, "RimModUpdater", msg)
         if (!ready) return
         try {
-            if (file.length() > MAX_BYTES) {
-                oldFile.delete()
-                file.renameTo(oldFile)
+            if (writer == null) writer = java.io.BufferedWriter(java.io.FileWriter(file, true), 32 * 1024)
+            val w = writer!!
+            w.write("${timeFmt.format(Date())} $level  $msg\n")
+            written += msg.length + 40
+            if (level != "steam") w.flush()
+            if (written > 200_000) {
+                written = 0
+                w.flush()
+                if (file.length() > MAX_BYTES) {
+                    w.close()
+                    writer = null
+                    oldFile.delete()
+                    file.renameTo(oldFile)
+                }
             }
-            file.appendText("${timeFmt.format(Date())} $level  $msg\n")
         } catch (_: Exception) {
         }
     }
@@ -92,6 +113,7 @@ object AppLog {
     /** Teks log lengkap untuk dilihat / dibagikan. */
     @Synchronized
     fun fullText(): String = buildString {
+        flush()
         append("RimMod Updater log\n")
         append("$buildLabel\n")
         append("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) • ${Build.MANUFACTURER} ${Build.MODEL}\n")
@@ -103,6 +125,7 @@ object AppLog {
 
     /** Ringkasan untuk ditampilkan di layar (yang penting saja, bukan log Steam yang ramai). */
     fun recentImportant(maxLines: Int = 300): String {
+        flush()
         if (!file.exists()) return ""
         return file.readLines().filter { !it.contains(" steam  ") }.takeLast(maxLines).joinToString("\n")
     }
@@ -118,6 +141,11 @@ object AppLog {
     @Synchronized
     fun clear() {
         if (!ready) return
+        try {
+            writer?.close()
+        } catch (_: Exception) {
+        }
+        writer = null
         file.delete()
         oldFile.delete()
         i("Log dihapus • $buildLabel")

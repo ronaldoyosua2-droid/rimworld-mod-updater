@@ -525,11 +525,23 @@ class MainActivity : AppCompatActivity() {
                         }
                     } else {
                         refreshSteamStatus()
+                        // 1) Ambil semua daftar file sekaligus dalam satu sesi Steam (jauh lebih cepat).
+                        val mfDir = File(cacheDir, "mf")
+                        val manifests = try {
+                            SteamManager.fetchManifests(this@MainActivity, needContent.map { it.workshopId.toLong() }, mfDir) { progress(it) }
+                        } catch (e: Exception) {
+                            AppLog.e("Ambil daftar file gagal", e)
+                            emptyMap()
+                        }
+                        // 2) Bandingkan dengan file lokal.
                         needContent.forEachIndexed { i, m ->
                             val prefix = "Cek isi [${i + 1}/${needContent.size}] ${m.displayName}: "
-                            progress(prefix + "ambil daftar file dari Steam…")
+                            progress(prefix + "membandingkan file…")
                             try {
-                                val r = compareContent(m) { progress(prefix + it) }
+                                val remote = manifests[m.workshopId.toLong()]?.getOrThrow()
+                                    ?: throw Exception("daftar file tidak didapat dari Steam")
+                                if (remote.isEmpty()) throw Exception("daftar file dari Steam kosong")
+                                val r = compareContent(m, remote) { progress(prefix + it) }
                                 if (r.same) {
                                     m.installedVersion = m.remoteVersion
                                     m.updateAvailable = false
@@ -547,6 +559,7 @@ class MainActivity : AppCompatActivity() {
                             store.save(mods)
                             renderList()
                         }
+                        mfDir.deleteRecursively()
                     }
                 }
                 store.save(mods)
@@ -562,28 +575,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Bandingkan file mod lokal dengan daftar file resmi (manifest) dari Steam. */
-    private suspend fun compareContent(m: ModEntry, onProgress: (String) -> Unit): ModFiles.CompareResult =
-        withContext(Dispatchers.IO) {
-            val work = File(cacheDir, "mf/${m.workshopId}")
-            work.deleteRecursively()
-            work.mkdirs()
-            try {
-                val remote = SteamManager.fetchManifest(this@MainActivity, m.workshopId.toLong(), work) {}
-                if (remote.isEmpty()) throw Exception("Daftar file dari Steam kosong")
-                AppLog.i("Manifest ${m.workshopId}: ${remote.size} file")
-                when (m.sourceType) {
-                    "folder" -> {
-                        val dir = ModFiles.resolveFolder(this@MainActivity, m)
-                            ?: throw Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
-                        ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
-                    }
-                    "zip" -> ModFiles.compareZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, remote, onProgress)
-                    else -> throw Exception("Tidak ada file lokal untuk dibandingkan")
-                }
-            } finally {
-                work.deleteRecursively()
+    private suspend fun compareContent(
+        m: ModEntry,
+        remote: List<ModFiles.RemoteFile>,
+        onProgress: (String) -> Unit,
+    ): ModFiles.CompareResult = withContext(Dispatchers.IO) {
+        when (m.sourceType) {
+            "folder" -> {
+                val dir = ModFiles.resolveFolder(this@MainActivity, m)
+                    ?: throw Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+                ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
             }
+            "zip" -> ModFiles.compareZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, remote, onProgress)
+            else -> throw Exception("Tidak ada file lokal untuk dibandingkan")
         }
+    }
 
     // ------------------------------------------------------------------ update
 

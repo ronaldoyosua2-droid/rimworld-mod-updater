@@ -6,6 +6,7 @@ import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.DownloadItem
 import `in`.dragonbra.javasteam.depotdownloader.data.PubFileItem
 import `in`.dragonbra.javasteam.enums.EResult
+import `in`.dragonbra.javasteam.enums.EWorkshopFileType
 import `in`.dragonbra.javasteam.steam.authentication.AuthPollResult
 import `in`.dragonbra.javasteam.steam.authentication.AuthSessionDetails
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesAuthSteamclient.EAuthSessionGuardType
@@ -286,6 +287,131 @@ object SteamManager {
         return ModFiles.parseManifest(txt)
     }
 
+    /**
+     * Tambalan bug JavaSteam 1.8.0: mod Workshop biasa bertipe 0 ("Community"), tapi library
+     * membacanya sebagai "First" (nama lain untuk 0) yang tidak ada di daftar tipe yang didukung,
+     * sehingga semua mod RimWorld dilewati. Tambahkan "First" ke daftar itu.
+     */
+    private val workshopTypePatched: Boolean by lazy {
+        try {
+            val candidates = listOf(DepotDownloader::class.java) +
+                DepotDownloader::class.java.declaredClasses.toList()
+            val field = candidates.flatMap { it.declaredFields.toList() }.firstOrNull {
+                java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    Set::class.java.isAssignableFrom(it.type) &&
+                    it.name.contains("Workshop", ignoreCase = true)
+            } ?: throw Exception("field tidak ditemukan")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val set = field.get(null) as MutableSet<EWorkshopFileType>
+            set.add(EWorkshopFileType.First)
+            AppLog.i("Tambalan tipe mod Workshop aktif (${field.name}: $set)")
+            true
+        } catch (e: Throwable) {
+            AppLog.e("Tambalan tipe mod Workshop gagal", e)
+            false
+        }
+    }
+
+    /**
+     * Ambil daftar file resmi untuk banyak mod sekaligus, memakai SATU sesi download
+     * (info game, kunci akses dan server cukup diminta sekali).
+     */
+    suspend fun fetchManifests(
+        ctx: Context,
+        ids: List<Long>,
+        baseDir: File,
+        onStatus: (String) -> Unit,
+    ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
+        if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
+        val c = client ?: throw LoginRequired()
+
+        val order = ids.distinct()
+        val dirs = order.associateWith { File(baseDir, it.toString()).apply { deleteRecursively(); mkdirs() } }
+        val results = java.util.concurrent.ConcurrentHashMap<Long, Result<List<ModFiles.RemoteFile>>>()
+        val activity = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        val started = System.currentTimeMillis()
+
+        fun parse(id: Long): Result<List<ModFiles.RemoteFile>> = runCatching {
+            val txt = dirs[id]!!.listFiles()?.firstOrNull { it.name.startsWith("manifest_") && it.name.endsWith(".txt") }
+                ?: throw Exception("Daftar file tidak didapat dari Steam")
+            ModFiles.parseManifest(txt)
+        }
+
+        workshopTypePatched
+        val dd = DepotDownloader(
+            steamClient = c,
+            licenses = licenses,
+            debug = false,
+            useLanCache = false,
+            maxDownloads = 4,
+            maxDecompress = 2,
+            maxFileWrites = 1,
+        )
+        dd.addListener(object : IDownloadListener {
+            override fun onDownloadStarted(item: DownloadItem) {
+                activity.set(System.currentTimeMillis())
+                val id = (item as? PubFileItem)?.pubFile ?: return
+                // Item sebelumnya yang selesai tanpa kabar dianggap gagal.
+                for (prev in order.takeWhile { it != id }) {
+                    results.putIfAbsent(prev, parse(prev))
+                }
+            }
+
+            override fun onDownloadCompleted(item: DownloadItem) {
+                activity.set(System.currentTimeMillis())
+                val id = (item as? PubFileItem)?.pubFile ?: return
+                results.putIfAbsent(id, parse(id))
+            }
+
+            override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
+                activity.set(System.currentTimeMillis())
+                val id = (item as? PubFileItem)?.pubFile ?: return
+                AppLog.e("Gagal ambil daftar file $id", error)
+                results.putIfAbsent(id, Result.failure(error))
+            }
+
+            override fun onStatusUpdate(message: String) {
+                activity.set(System.currentTimeMillis())
+            }
+        })
+
+        try {
+            order.forEach { id ->
+                dd.add(
+                    PubFileItem(
+                        appId = WorkshopApi.RIMWORLD_APP_ID,
+                        pubFile = id,
+                        installToGameNameDirectory = false,
+                        installDirectory = dirs[id]!!.absolutePath,
+                        verify = false,
+                        downloadManifestOnly = true,
+                    )
+                )
+            }
+            dd.finishAdding()
+            var lastShown = -1
+            while (results.size < order.size) {
+                delay(200)
+                if (results.size != lastShown) {
+                    lastShown = results.size
+                    onStatus("Ambil daftar file dari Steam: ${results.size}/${order.size} mod")
+                }
+                if (System.currentTimeMillis() - activity.get() > 45_000) {
+                    AppLog.w("Ambil daftar file: tidak ada kemajuan 45 detik, berhenti")
+                    break
+                }
+            }
+        } finally {
+            try {
+                dd.close()
+            } catch (_: Exception) {
+            }
+        }
+        AppLog.i("Ambil ${order.size} daftar file selesai dalam ${(System.currentTimeMillis() - started) / 1000} detik")
+        order.associateWith { id -> results[id] ?: parse(id).takeIf { it.isSuccess } ?: Result.failure(Exception("Steam tidak merespons")) }
+    }
+
     private suspend fun runDepot(
         ctx: Context,
         workshopId: Long,
@@ -300,6 +426,7 @@ object SteamManager {
         val done = CompletableDeferred<Unit>()
         val activity = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
 
+        workshopTypePatched
         val dd = DepotDownloader(
             steamClient = c,
             licenses = licenses,
