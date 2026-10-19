@@ -79,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLog.init(this)
+        SteamManager.installCrypto()
         store = ModStore(this)
         mods.addAll(store.load())
         buildUi()

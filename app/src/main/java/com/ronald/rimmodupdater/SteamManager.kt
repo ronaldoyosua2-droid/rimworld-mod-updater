@@ -50,6 +50,26 @@ object SteamManager {
     private var logonSignal: CompletableDeferred<EResult>? = null
     private var licenseSignal: CompletableDeferred<List<License>>? = null
 
+    /**
+     * Android punya provider kriptografi bawaan bernama "BC" yang sudah dipangkas (tanpa SHA-1, dll.).
+     * JavaSteam memakai provider bernama "BC", jadi ganti dengan BouncyCastle lengkap yang ikut di aplikasi.
+     * Harus dipanggil sebelum JavaSteam dipakai.
+     */
+    fun installCrypto() {
+        try {
+            java.security.Security.removeProvider("BC")
+            java.security.Security.insertProviderAt(org.bouncycastle.jce.provider.BouncyCastleProvider(), 1)
+            val ok = try {
+                java.security.MessageDigest.getInstance("SHA-1", "BC"); true
+            } catch (_: Exception) {
+                false
+            }
+            AppLog.i("Kriptografi BouncyCastle lengkap dipasang (SHA-1: ${if (ok) "OK" else "TIDAK ADA"})")
+        } catch (e: Throwable) {
+            AppLog.e("Gagal memasang BouncyCastle", e)
+        }
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("steam", Context.MODE_PRIVATE)
 
     fun savedAccount(ctx: Context): String? = prefs(ctx).getString("account", null)
