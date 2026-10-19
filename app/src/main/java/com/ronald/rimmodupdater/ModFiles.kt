@@ -251,18 +251,34 @@ object ModFiles {
         val local = mutableMapOf<String, Pair<Uri, Long>>()
         listTree(ctx, dir.uri, DocumentsContract.getDocumentId(dir.uri), "", local)
         val lower = local.entries.associate { it.key.lowercase() to it.value }
+        // Tahap 1 (cepat): cek file yang hilang / ukurannya beda. Kalau sudah ada beda, tidak perlu hitung hash.
         val diff = mutableListOf<String>()
-        remote.forEachIndexed { i, rf ->
+        val toHash = mutableListOf<Pair<RemoteFile, Uri>>()
+        remote.forEach { rf ->
             val l = local[rf.path] ?: lower[rf.path.lowercase()]
             when {
                 l == null -> diff += "${rf.path} (tidak ada)"
                 l.second != rf.size -> diff += "${rf.path} (ukuran beda)"
-                needsHash(rf) -> {
-                    if (i % 10 == 0) onProgress("Memeriksa file ${i + 1}/${remote.size}")
-                    val h = ctx.contentResolver.openInputStream(l.first)?.use { sha1(it) }
-                    if (h != rf.sha1) diff += "${rf.path} (isi beda)"
-                }
+                needsHash(rf) -> toHash += rf to l.first
             }
+        }
+        if (diff.isNotEmpty() || toHash.isEmpty()) return CompareResult(remote.size, diff)
+
+        // Tahap 2: hitung hash file kode/data, beberapa sekaligus.
+        val done = java.util.concurrent.atomic.AtomicInteger(0)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+        try {
+            val results = pool.invokeAll(toHash.map { (rf, uri) ->
+                java.util.concurrent.Callable {
+                    val h = ctx.contentResolver.openInputStream(uri)?.use { sha1(it) }
+                    val n = done.incrementAndGet()
+                    if (n % 20 == 0) onProgress("Memeriksa isi file $n/${toHash.size}")
+                    if (h != rf.sha1) "${rf.path} (isi beda)" else null
+                }
+            })
+            results.mapNotNullTo(diff) { it.get() }
+        } finally {
+            pool.shutdown()
         }
         return CompareResult(remote.size, diff)
     }

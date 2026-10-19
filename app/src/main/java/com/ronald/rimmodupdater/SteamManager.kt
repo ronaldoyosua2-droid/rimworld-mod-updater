@@ -23,6 +23,8 @@ import `in`.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback
 import `in`.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
@@ -344,13 +346,35 @@ object SteamManager {
         onStatus: (String) -> Unit,
     ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
+        val all = ids.distinct()
+        val started = System.currentTimeMillis()
+        val doneCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val report: () -> Unit = { onStatus("Ambil daftar file dari Steam: ${doneCount.get()}/${all.size} mod") }
+        report()
+        // Bagi ke beberapa jalur yang berjalan bersamaan (round-robin supaya mod besar tersebar).
+        val lanes = minOf(4, all.size).coerceAtLeast(1)
+        val groups = (0 until lanes).map { lane -> all.filterIndexed { i, _ -> i % lanes == lane } }
+        val merged = kotlinx.coroutines.coroutineScope {
+            groups.map { g ->
+                async { fetchManifestsLane(g, baseDir, doneCount, report) }
+            }.awaitAll()
+        }.fold(mutableMapOf<Long, Result<List<ModFiles.RemoteFile>>>()) { acc, m -> acc.putAll(m); acc }
+        AppLog.i("Ambil ${all.size} daftar file ($lanes jalur) selesai dalam ${(System.currentTimeMillis() - started) / 1000} detik")
+        merged
+    }
+
+    private suspend fun fetchManifestsLane(
+        ids: List<Long>,
+        baseDir: File,
+        doneCount: java.util.concurrent.atomic.AtomicInteger,
+        report: () -> Unit,
+    ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
         val c = client ?: throw LoginRequired()
 
         val order = ids.distinct()
         val dirs = order.associateWith { File(baseDir, it.toString()).apply { deleteRecursively(); mkdirs() } }
         val results = java.util.concurrent.ConcurrentHashMap<Long, Result<List<ModFiles.RemoteFile>>>()
         val activity = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
-        val started = System.currentTimeMillis()
 
         fun parse(id: Long): Result<List<ModFiles.RemoteFile>> = runCatching {
             val txt = dirs[id]!!.listFiles()?.firstOrNull { it.name.startsWith("manifest_") && it.name.endsWith(".txt") }
@@ -374,21 +398,21 @@ object SteamManager {
                 val id = (item as? PubFileItem)?.pubFile ?: return
                 // Item sebelumnya yang selesai tanpa kabar dianggap gagal.
                 for (prev in order.takeWhile { it != id }) {
-                    results.putIfAbsent(prev, parse(prev))
+                    if (results.putIfAbsent(prev, parse(prev)) == null) { doneCount.incrementAndGet(); report() }
                 }
             }
 
             override fun onDownloadCompleted(item: DownloadItem) {
                 activity.set(System.currentTimeMillis())
                 val id = (item as? PubFileItem)?.pubFile ?: return
-                results.putIfAbsent(id, parse(id))
+                if (results.putIfAbsent(id, parse(id)) == null) { doneCount.incrementAndGet(); report() }
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 activity.set(System.currentTimeMillis())
                 val id = (item as? PubFileItem)?.pubFile ?: return
                 AppLog.e("Gagal ambil daftar file $id", error)
-                results.putIfAbsent(id, Result.failure(error))
+                if (results.putIfAbsent(id, Result.failure(error)) == null) { doneCount.incrementAndGet(); report() }
             }
 
             override fun onStatusUpdate(message: String) {
@@ -410,13 +434,8 @@ object SteamManager {
                 )
             }
             dd.finishAdding()
-            var lastShown = -1
             while (results.size < order.size) {
                 delay(200)
-                if (results.size != lastShown) {
-                    lastShown = results.size
-                    onStatus("Ambil daftar file dari Steam: ${results.size}/${order.size} mod")
-                }
                 if (System.currentTimeMillis() - activity.get() > 45_000) {
                     AppLog.w("Ambil daftar file: tidak ada kemajuan 45 detik, berhenti")
                     break
@@ -428,7 +447,6 @@ object SteamManager {
             } catch (_: Exception) {
             }
         }
-        AppLog.i("Ambil ${order.size} daftar file selesai dalam ${(System.currentTimeMillis() - started) / 1000} detik")
         order.associateWith { id -> results[id] ?: parse(id).takeIf { it.isSuccess } ?: Result.failure(Exception("Steam tidak merespons")) }
     }
 
