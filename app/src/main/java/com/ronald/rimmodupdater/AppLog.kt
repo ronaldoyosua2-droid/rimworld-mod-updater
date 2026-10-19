@@ -23,6 +23,9 @@ object AppLog {
     private lateinit var crashFile: File
     private val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var ready = false
+
+    /** Penerus baris log (dipakai panel terminal). Dipanggil dari thread mana pun. */
+    @Volatile var tap: ((level: String, msg: String) -> Unit)? = null
     private var writer: java.io.Writer? = null
     private var written = 0L
 
@@ -80,6 +83,10 @@ object AppLog {
 
     @Synchronized
     private fun write(level: String, msg: String) {
+        try {
+            tap?.invoke(level, msg)
+        } catch (_: Throwable) {
+        }
         Log.println(if (level == "info" || level == "steam") Log.INFO else Log.ERROR, "RimModUpdater", msg)
         if (!ready) return
         try {

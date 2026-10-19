@@ -298,8 +298,10 @@ object SteamManager {
         dir: File,
         onStatus: (String) -> Unit,
         onFraction: (Float) -> Unit = {},
+        onChunk: (Long) -> Unit = {},
+        onFile: (String) -> Unit = {},
     ) {
-        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus, onFraction = onFraction)
+        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus, onFraction = onFraction, onChunk = onChunk, onFile = onFile)
         val count = ModFiles.downloadedFiles(dir).size
         AppLog.i("Download $workshopId selesai: $count file")
         if (count == 0) {
@@ -351,6 +353,7 @@ object SteamManager {
         baseDir: File,
         onStatus: (String) -> Unit,
         onFraction: (Float) -> Unit = {},
+        onManifest: (Long, Result<List<ModFiles.RemoteFile>>) -> Unit = { _, _ -> },
     ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
         val all = ids.distinct()
@@ -366,7 +369,7 @@ object SteamManager {
         val groups = (0 until lanes).map { lane -> all.filterIndexed { i, _ -> i % lanes == lane } }
         val merged = kotlinx.coroutines.coroutineScope {
             groups.map { g ->
-                async { fetchManifestsLane(g, baseDir, doneCount, report) }
+                async { fetchManifestsLane(g, baseDir, doneCount, report, onManifest) }
             }.awaitAll()
         }.fold(mutableMapOf<Long, Result<List<ModFiles.RemoteFile>>>()) { acc, m -> acc.putAll(m); acc }
         AppLog.i("Ambil ${all.size} daftar file ($lanes jalur) selesai dalam ${(System.currentTimeMillis() - started) / 1000} detik")
@@ -378,6 +381,7 @@ object SteamManager {
         baseDir: File,
         doneCount: java.util.concurrent.atomic.AtomicInteger,
         report: () -> Unit,
+        onManifest: (Long, Result<List<ModFiles.RemoteFile>>) -> Unit,
     ): Map<Long, Result<List<ModFiles.RemoteFile>>> = withContext(Dispatchers.IO) {
         val c = client ?: throw LoginRequired()
 
@@ -408,21 +412,21 @@ object SteamManager {
                 val id = (item as? PubFileItem)?.pubFile ?: return
                 // Item sebelumnya yang selesai tanpa kabar dianggap gagal.
                 for (prev in order.takeWhile { it != id }) {
-                    if (results.putIfAbsent(prev, parse(prev)) == null) { doneCount.incrementAndGet(); report() }
+                    if (!results.containsKey(prev)) parse(prev).let { r -> if (results.putIfAbsent(prev, r) == null) { doneCount.incrementAndGet(); report(); onManifest(prev, r) } }
                 }
             }
 
             override fun onDownloadCompleted(item: DownloadItem) {
                 activity.set(System.currentTimeMillis())
                 val id = (item as? PubFileItem)?.pubFile ?: return
-                if (results.putIfAbsent(id, parse(id)) == null) { doneCount.incrementAndGet(); report() }
+                parse(id).let { r -> if (results.putIfAbsent(id, r) == null) { doneCount.incrementAndGet(); report(); onManifest(id, r) } }
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 activity.set(System.currentTimeMillis())
                 val id = (item as? PubFileItem)?.pubFile ?: return
                 AppLog.e("Gagal ambil daftar file $id", error)
-                if (results.putIfAbsent(id, Result.failure(error)) == null) { doneCount.incrementAndGet(); report() }
+                Result.failure<List<ModFiles.RemoteFile>>(error).let { r -> if (results.putIfAbsent(id, r) == null) { doneCount.incrementAndGet(); report(); onManifest(id, r) } }
             }
 
             override fun onStatusUpdate(message: String) {
@@ -467,6 +471,8 @@ object SteamManager {
         manifestOnly: Boolean,
         onStatus: (String) -> Unit,
         onFraction: (Float) -> Unit = {},
+        onChunk: (Long) -> Unit = {},
+        onFile: (String) -> Unit = {},
     ) = withContext(Dispatchers.IO) {
         // Sambung ulang otomatis (pakai token tersimpan) kalau koneksi sempat putus.
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
@@ -504,11 +510,13 @@ object SteamManager {
                 activity.set(System.currentTimeMillis())
                 onStatus("Download: $fileName")
                 onFraction(depotPercentComplete)
+                onFile(fileName)
             }
 
             override fun onChunkCompleted(depotId: Int, depotPercentComplete: Float, compressedBytes: Long, uncompressedBytes: Long) {
                 activity.set(System.currentTimeMillis())
                 onFraction(depotPercentComplete)
+                onChunk(uncompressedBytes)
             }
         })
         dd.getCompletion().whenComplete { _, err ->

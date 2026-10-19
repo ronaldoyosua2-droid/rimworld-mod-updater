@@ -48,11 +48,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var steamStatus: TextView
     private lateinit var steamButton: MaterialButton
-    private lateinit var progressText: TextView
-    private lateinit var progressRow: LinearLayout
-    private lateinit var progressBar: LinearProgressIndicator
-    private lateinit var percentText: TextView
-    @Volatile private var lastPercent = -1
+    private lateinit var panel: ProgressPanel
     private lateinit var listContainer: LinearLayout
     private val actionButtons = mutableListOf<View>()
 
@@ -174,36 +170,11 @@ class MainActivity : AppCompatActivity() {
         root.addView(row(bFolder, bZip, bLink))
         root.addView(row(bCheck, bAll, bOut))
 
-        progressText = TextView(this).apply {
-            textSize = 12f
-            setPadding(0, px(6), 0, px(6))
-            visibility = View.GONE
-        }
-        root.addView(progressText)
-
-        progressBar = LinearProgressIndicator(this).apply {
-            isIndeterminate = true
-            max = 100
-            trackCornerRadius = px(4)
-            trackThickness = px(8)
-        }
-        percentText = TextView(this).apply {
-            textSize = 13f
-            setTypeface(typeface, Typeface.BOLD)
-            minWidth = px(44)
-            gravity = Gravity.END
-        }
-        progressRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            visibility = View.GONE
-            setPadding(0, 0, 0, px(8))
-            addView(progressBar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(percentText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                marginStart = px(8)
-            })
-        }
-        root.addView(progressRow)
+        panel = ProgressPanel(this)
+        root.addView(panel.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = px(6)
+            bottomMargin = px(8)
+        })
 
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(listContainer) },
@@ -221,44 +192,43 @@ class MainActivity : AppCompatActivity() {
 
     private fun setBusy(b: Boolean, msg: String? = null) {
         busy = b
-        progressRow.visibility = if (b) View.VISIBLE else View.GONE
-        lastPercent = -2
-        setFraction(null)
         actionButtons.forEach { it.isEnabled = !b }
         steamButton.isEnabled = !b
-        showProgress(msg)
+        if (b) {
+            panel.start("", msg ?: "Memproses…", "")
+            AppLog.tap = { level, line -> terminalFromLog(level, line) }
+        } else {
+            AppLog.tap = null
+            // biarkan hasil akhir terlihat sebentar
+            panel.view.postDelayed({ if (!busy) panel.hide() }, 2500)
+        }
         renderList()
     }
 
-    private fun showProgress(msg: String?) {
-        progressText.visibility = if (msg.isNullOrBlank()) View.GONE else View.VISIBLE
-        progressText.text = msg ?: ""
-    }
+    private fun showProgress(msg: String?) = panel.detail(msg ?: "")
 
-    private fun progress(msg: String) = runOnUiThread { showProgress(msg) }
+    private fun progress(msg: String) = panel.detail(msg)
 
     /** Atur bar persentase (0..1). null = berjalan tanpa persen. */
-    private fun setFraction(f: Float?) {
-        val pct = f?.let { (it.coerceIn(0f, 1f) * 100).toInt() } ?: -1
-        if (pct == lastPercent) return
-        lastPercent = pct
-        runOnUiThread {
-            if (pct < 0) {
-                if (!progressBar.isIndeterminate) {
-                    progressBar.visibility = View.INVISIBLE
-                    progressBar.isIndeterminate = true
-                    progressBar.visibility = View.VISIBLE
-                }
-                percentText.text = ""
-            } else {
-                if (progressBar.isIndeterminate) {
-                    progressBar.visibility = View.INVISIBLE
-                    progressBar.isIndeterminate = false
-                    progressBar.visibility = View.VISIBLE
-                }
-                progressBar.setProgressCompat(pct, true)
-                percentText.text = "$pct%"
+    private fun setFraction(f: Float?) = panel.fraction(f)
+
+    /** Terjemahkan log Steam yang menarik jadi baris terminal. */
+    private fun terminalFromLog(level: String, line: String) {
+        when {
+            level == "STEAM-ERR" || level == "ERROR" -> panel.log("ERR", line.lineSequence().first().take(90), error = true)
+            level == "WARN" -> panel.log("NET", line.take(90))
+            line.contains("Request URL is:") -> {
+                val url = Regex("""url=(https?://[^,}\s]+)""").find(line)?.groupValues?.get(1) ?: return
+                val host = url.substringAfter("://").substringBefore("/").substringBefore(".")
+                val path = url.substringAfter("://").substringAfter("/")
+                val parts = path.split("/")
+                val kind = parts.getOrNull(2) ?: "data"
+                val id = parts.getOrNull(3)?.let { if (it.length > 14) it.take(10) + "…" + it.takeLast(4) else it } ?: ""
+                panel.log("GET", "$host /$kind/$id")
             }
+            line.contains("] Connected to ") -> panel.log("CONNECT", line.substringAfter("Connected to ").take(60), "OK")
+            line.contains("handleLogOnResponse") -> panel.log("LOGON", "steam session", line.substringAfter("response: ").substringBefore(",").take(12))
+            line.contains("epot key", ignoreCase = true) -> panel.log("KEY", "depot ${WorkshopApi.RIMWORLD_APP_ID} ········", "GRANTED")
         }
     }
 
@@ -547,7 +517,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         lifecycleScope.launch {
-            setBusy(true, "Mengecek ${targets.size} mod di Steam Workshop…")
+            setBusy(true, "Steam Workshop")
+            val t0 = System.currentTimeMillis()
+            panel.start("CEK UPDATE · ${targets.size} MOD", "Steam Workshop", "CEK VERSI")
+            panel.log("QUERY", "PublishedFileDetails × ${targets.size}")
             try {
                 AppLog.i("Cek update ${targets.size} mod")
                 val details = withContext(Dispatchers.IO) { WorkshopApi.getDetails(targets.map { it.workshopId }) }
@@ -584,6 +557,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 store.save(mods)
                 renderList()
+                panel.log("RESULT", "${details.size}/${targets.size} mod ditemukan", "OK")
 
                 // Mod yang versinya belum diketahui: bandingkan isi file dengan daftar file resmi di Steam.
                 if (needContent.isNotEmpty()) {
@@ -598,6 +572,10 @@ class MainActivity : AppCompatActivity() {
                         refreshSteamStatus()
                         // 1) Ambil semua daftar file sekaligus dalam satu sesi Steam (jauh lebih cepat).
                         val mfDir = File(cacheDir, "mf")
+                        panel.title("Daftar file resmi")
+                        panel.badge("MANIFEST")
+                        val nameOf = needContent.associate { it.workshopId.toLong() to it.displayName }
+                        var mfDone = 0
                         val manifests = try {
                             SteamManager.fetchManifests(
                                 this@MainActivity,
@@ -605,26 +583,49 @@ class MainActivity : AppCompatActivity() {
                                 mfDir,
                                 onStatus = { progress(it) },
                                 onFraction = { setFraction(it * 0.5f) },
+                                onManifest = { id, r ->
+                                    mfDone++
+                                    panel.stats(
+                                        "$mfDone/${needContent.size}" to "daftar file",
+                                        "4" to "jalur paralel",
+                                        "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                                    )
+                                    r.onSuccess { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.size} files", "OK") }
+                                    r.onFailure { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.message}", error = true) }
+                                },
                             )
                         } catch (e: Exception) {
                             AppLog.e("Ambil daftar file gagal", e)
                             emptyMap()
                         }
                         // 2) Bandingkan dengan file lokal.
+                        var diffMods = 0
+                        panel.badge("CEK ISI")
                         needContent.forEachIndexed { i, m ->
-                            val prefix = "Cek isi [${i + 1}/${needContent.size}] ${m.displayName}: "
-                            progress(prefix + "membandingkan file…")
+                            val prefix = ""
+                            panel.caption("CEK ISI · ${i + 1} DARI ${needContent.size}")
+                            panel.title(m.displayName)
+                            panel.stats(
+                                "${i + 1}/${needContent.size}" to "mod",
+                                "$diffMods" to "perlu update",
+                                "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                            )
+                            progress("Membandingkan file…")
                             setFraction(0.5f + 0.5f * i / needContent.size)
                             try {
                                 val remote = manifests[m.workshopId.toLong()]?.getOrThrow()
                                     ?: throw Exception("daftar file tidak didapat dari Steam")
                                 if (remote.isEmpty()) throw Exception("daftar file dari Steam kosong")
                                 val r = compareContent(m, remote) { progress(prefix + it) }
+                                m.remoteFileCount = r.total
                                 if (r.same) {
                                     m.installedVersion = m.remoteVersion
                                     m.updateAvailable = false
                                     m.status = "Terbaru ✓ (isi sama dengan Workshop)"
+                                    panel.log("SHA1", "${m.displayName} · ${r.total} files", "MATCH")
                                 } else {
+                                    diffMods++
+                                    panel.log("DIFF", "${m.displayName} · ${r.different.size}/${r.total} beda", "UPDATE")
                                     m.updateAvailable = true
                                     // Tandai versi lama, supaya cek berikutnya tidak perlu bandingkan isi lagi.
                                     m.installedVersion = OUTDATED
@@ -633,6 +634,7 @@ class MainActivity : AppCompatActivity() {
                                 }
                             } catch (e: Exception) {
                                 AppLog.e("Cek isi ${m.workshopId} (${m.displayName}) gagal", e)
+                                panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
                                 m.updateAvailable = false
                                 m.status = "Gagal cek isi: ${e.message ?: e.javaClass.simpleName}"
                             }
@@ -643,8 +645,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 store.save(mods)
-                setBusy(false)
                 val updates = targets.count { it.updateAvailable }
+                panel.caption("CEK UPDATE · SELESAI")
+                panel.title(if (updates == 0) "Semua terbaru" else "$updates mod perlu update")
+                panel.badge("SELESAI")
+                panel.fraction(1f)
+                panel.detail("")
+                panel.log("DONE", "${targets.size} mod dicek dalam ${(System.currentTimeMillis() - t0) / 1000} dtk", "✓")
+                setBusy(false)
                 toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod perlu diupdate")
             } catch (e: Exception) {
                 AppLog.e("Gagal cek update", e)
@@ -707,6 +715,7 @@ class MainActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             setBusy(true, "Menghubungkan ke Steam…")
+            panel.start("UPDATE MOD · ${list.size} MOD", "Menghubungkan ke Steam…", "LOGIN")
             if (!ensureSteam()) {
                 setBusy(false)
                 return@launch
@@ -715,23 +724,50 @@ class MainActivity : AppCompatActivity() {
             var ok = 0
             val total = list.sumOf { it.remoteSize }
             if (total > 0) AppLog.i("Update ${list.size} mod, total ${fmtSize(total)}")
+            val states = list.map { it.displayName to ProgressPanel.ItemState.PENDING }.toMutableList()
             list.forEachIndexed { i, m ->
-                val prefix = "[${i + 1}/${list.size}] ${m.displayName}: "
+                states[i] = m.displayName to ProgressPanel.ItemState.CURRENT
+                panel.items(states.toList())
+                panel.caption("UPDATE MOD · ${i + 1} DARI ${list.size}")
+                panel.title(m.displayName)
+                panel.badge("DOWNLOAD")
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
-                    updateOne(m, { progress(prefix + it) }) { f -> setFraction((i + f) / list.size) }
+                    updateOne(m, { progress(it) }) { f -> setFraction((i + f) / list.size) }
                     ok++
+                    states[i] = m.displayName to ProgressPanel.ItemState.DONE
+                    panel.log("DONE", m.displayName, "✓")
                 } catch (e: SteamManager.LoginRequired) {
                     m.status = "Gagal: perlu login Steam lagi"
+                    states[i] = m.displayName to ProgressPanel.ItemState.FAILED
+                    panel.log("FAIL", "${m.displayName}: perlu login lagi", error = true)
                 } catch (e: Exception) {
                     AppLog.e("Update ${m.workshopId} (${m.displayName}) gagal", e)
                     m.status = "Gagal: ${e.message ?: e.javaClass.simpleName}"
+                    states[i] = m.displayName to ProgressPanel.ItemState.FAILED
+                    panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
                 }
+                panel.items(states.toList())
                 store.save(mods)
                 runOnUiThread { renderList() }
             }
+            panel.caption("UPDATE MOD · SELESAI")
+            panel.title("$ok dari ${list.size} berhasil")
+            panel.badge("SELESAI")
+            panel.fraction(1f)
+            panel.detail("")
             setBusy(false)
             toast("Selesai: $ok dari ${list.size} mod berhasil")
+        }
+    }
+
+    /** Teruskan pesan salin ke status dan ke terminal. */
+    private fun copyLog(onProgress: (String) -> Unit): (String) -> Unit = { msg ->
+        onProgress(msg)
+        when {
+            msg.startsWith("Menyalin ") -> panel.log("COPY", msg.removePrefix("Menyalin "), "✓")
+            msg.startsWith("Mengemas ") -> panel.log("ZIP", msg.removePrefix("Mengemas "), "✓")
+            msg.startsWith("Menghapus") -> panel.log("CLEAN", "hapus file versi lama")
         }
     }
 
@@ -757,19 +793,52 @@ class MainActivity : AppCompatActivity() {
             }
             onProgress("Download dari Steam…")
             // Download = 0..80%, salin ke folder = 80..100%
-            var lastMb = -1L
-            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, {}) { f ->
-                onFraction(f * 0.8f)
-                if (m.remoteSize > 0) {
-                    val got = (f * m.remoteSize).toLong()
-                    val step = got / (256 * 1024)
-                    if (step != lastMb) {
-                        lastMb = step
-                        onProgress("Download ${fmtSize(got)} / ${fmtSize(m.remoteSize)}")
-                    }
-                }
+            val t0 = System.currentTimeMillis()
+            val bytes = java.util.concurrent.atomic.AtomicLong(0)
+            val files = java.util.concurrent.atomic.AtomicInteger(0)
+            val chunks = java.util.concurrent.atomic.AtomicInteger(0)
+            val size = m.remoteSize
+            val fileTotal = m.remoteFileCount
+            fun dlStats() {
+                val got = bytes.get()
+                val secs = ((System.currentTimeMillis() - t0) / 1000.0).coerceAtLeast(0.5)
+                val speed = got / secs
+                val left = if (size > 0 && speed > 0) ((size - got).coerceAtLeast(0) / speed).toLong() else -1
+                panel.stats(
+                    (if (fileTotal > 0) "${files.get()}/$fileTotal" else "${files.get()}") to "file",
+                    fmtSize(got) to (if (size > 0) "dari ${fmtSize(size)}" else "terunduh"),
+                    "${fmtSize(speed.toLong())}/s" to "kecepatan",
+                    (if (left >= 0) "~${left} dtk" else "-") to "sisa",
+                )
+                onProgress("Download ${fmtSize(got)}" + if (size > 0) " / ${fmtSize(size)}" else "")
             }
-            val copyFrac: (Float) -> Unit = { onFraction(0.8f + it * 0.2f) }
+            SteamManager.downloadMod(
+                this@MainActivity,
+                m.workshopId.toLong(),
+                work,
+                onStatus = {},
+                onFraction = { f -> onFraction(f * 0.8f) },
+                onChunk = { b ->
+                    bytes.addAndGet(b)
+                    panel.log("CHUNK", "#${chunks.incrementAndGet()}  ${fmtSize(b)} → zstd", "✓")
+                    dlStats()
+                },
+                onFile = { name ->
+                    files.incrementAndGet()
+                    panel.log("FILE", name, "✓")
+                    dlStats()
+                },
+            )
+            panel.badge("MENYALIN")
+            val copyTotal = ModFiles.downloadedFiles(work).size
+            val copyFrac: (Float) -> Unit = { f ->
+                onFraction(0.8f + f * 0.2f)
+                panel.stats(
+                    "${(f * copyTotal).toInt()}/$copyTotal" to "file disalin",
+                    fmtSize(bytes.get().coerceAtLeast(size)) to "ukuran",
+                    "${(System.currentTimeMillis() - t0) / 1000} dtk" to "berjalan",
+                )
+            }
             ModFiles.ensurePublishedId(work, m.workshopId)
 
             when (m.sourceType) {
@@ -777,15 +846,15 @@ class MainActivity : AppCompatActivity() {
                     val target = ModFiles.resolveFolder(this@MainActivity, m)
                         ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
                     if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
-                    ModFiles.replaceFolder(this@MainActivity, target, work, onProgress, copyFrac)
+                    ModFiles.replaceFolder(this@MainActivity, target, work, copyLog(onProgress), copyFrac)
                 }
                 "zip" -> {
-                    ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, onProgress, copyFrac)
+                    ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, copyLog(onProgress), copyFrac)
                 }
                 else -> {
                     val out = outputRoot() ?: throw Exception("Folder hasil belum dipilih")
                     val folderName = ModFiles.safeFolderName(m.displayName, m.workshopId)
-                    ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, onProgress, copyFrac)
+                    ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, copyLog(onProgress), copyFrac)
                 }
             }
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)
