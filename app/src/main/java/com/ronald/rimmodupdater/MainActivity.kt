@@ -25,7 +25,6 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import `in`.dragonbra.javasteam.steam.authentication.IAuthenticator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -35,7 +34,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CancellationException
-import java.util.concurrent.CompletableFuture
 import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity() {
@@ -648,14 +646,17 @@ class MainActivity : AppCompatActivity() {
             val cred = askCredentials() ?: return false
             try {
                 progress("Login sebagai ${cred.first}…")
-                SteamManager.loginWithPassword(this, cred.first, cred.second, UiAuthenticator())
+                SteamManager.loginWithPassword(this, cred.first, cred.second, UiLogin())
                 refreshSteamStatus()
                 toast("Login berhasil")
                 return true
             } catch (e: Exception) {
                 val cause = (e.cause ?: e)
+                if (e is SteamManager.LoginCancelled || cause is CancellationException) {
+                    AppLog.i("Login dibatalkan")
+                    return false
+                }
                 AppLog.e("Login Steam gagal", e)
-                if (cause is CancellationException) return false
                 toast("Login gagal: ${cause.message ?: cause.javaClass.simpleName}")
             }
         }
@@ -698,53 +699,51 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** Menjembatani pertanyaan Steam Guard dari JavaSteam ke dialog di layar. */
-    private inner class UiAuthenticator : IAuthenticator {
-        override fun getDeviceCode(previousCodeWasIncorrect: Boolean): CompletableFuture<String> =
-            askCode(
-                "Kode Steam Guard",
-                (if (previousCodeWasIncorrect) "Kode salah, coba lagi.\n" else "") +
-                    "Buka aplikasi Steam → Steam Guard, lalu masukkan kodenya."
-            )
+    /** Dialog verifikasi Steam (Steam Guard) yang dipakai selama login. */
+    private inner class UiLogin : SteamManager.LoginUi {
 
-        override fun getEmailCode(email: String?, previousCodeWasIncorrect: Boolean): CompletableFuture<String> =
-            askCode(
-                "Kode dari email",
-                (if (previousCodeWasIncorrect) "Kode salah, coba lagi.\n" else "") +
-                    "Steam mengirim kode ke email ${email ?: "kamu"}."
-            )
-
-        override fun acceptDeviceConfirmation(): CompletableFuture<Boolean> {
-            val f = CompletableFuture<Boolean>()
-            runOnUiThread {
-                MaterialAlertDialogBuilder(this@MainActivity)
-                    .setTitle("Konfirmasi login")
-                    .setMessage("Buka aplikasi Steam dan tekan \"Approve/Setujui\" pada permintaan login, lalu kembali ke sini.\n\nAtau pilih \"Pakai kode\" untuk memasukkan kode Steam Guard.")
-                    .setCancelable(false)
-                    .setPositiveButton("Sudah / tunggu persetujuan") { _, _ -> f.complete(true) }
-                    .setNegativeButton("Pakai kode") { _, _ -> f.complete(false) }
-                    .show()
+        private suspend fun <T> dialog(build: (MaterialAlertDialogBuilder, (T) -> Unit) -> Unit): T =
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    var done = false
+                    val finish: (T) -> Unit = { v -> if (!done) { done = true; cont.resume(v) } }
+                    val b = MaterialAlertDialogBuilder(this@MainActivity).setCancelable(false)
+                    build(b, finish)
+                    b.show()
+                }
             }
-            return f
+
+        override suspend fun chooseApproveInApp(): Boolean = dialog { b, finish ->
+            b.setTitle("Verifikasi Steam Guard")
+                .setMessage("Pilih cara verifikasi login:")
+                .setPositiveButton("Setujui di app Steam") { _, _ -> finish(true) }
+                .setNegativeButton("Masukkan kode") { _, _ -> finish(false) }
         }
 
-        private fun askCode(title: String, message: String): CompletableFuture<String> {
-            val f = CompletableFuture<String>()
-            runOnUiThread {
-                val input = EditText(this@MainActivity).apply {
-                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
-                    hint = "Kode"
-                }
-                MaterialAlertDialogBuilder(this@MainActivity)
-                    .setTitle(title)
-                    .setMessage(message)
-                    .setView(padded(input))
-                    .setCancelable(false)
-                    .setPositiveButton("OK") { _, _ -> f.complete(input.text.toString().trim().uppercase()) }
-                    .setNegativeButton("Batal") { _, _ -> f.completeExceptionally(CancellationException("Login dibatalkan")) }
-                    .show()
+        override suspend fun waitApproved(): Boolean = dialog { b, finish ->
+            b.setTitle("Setujui di aplikasi Steam")
+                .setMessage(
+                    "1. Buka aplikasi Steam di HP-mu.\n" +
+                        "2. Tekan \"Approve / Setujui\" pada permintaan login \"RimMod Updater\".\n" +
+                        "3. Kembali ke sini, lalu tekan tombol \"Sudah disetujui\".\n\n" +
+                        "Tidak apa-apa kalau koneksi sempat putus saat kamu pindah aplikasi, nanti otomatis tersambung lagi."
+                )
+                .setPositiveButton("Sudah disetujui") { _, _ -> finish(true) }
+                .setNegativeButton("Batal") { _, _ -> finish(false) }
+        }
+
+        override suspend fun askCode(isEmail: Boolean, hint: String?, previousWrong: Boolean): String? = dialog { b, finish ->
+            val input = EditText(this@MainActivity).apply {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+                this.hint = "Kode"
             }
-            return f
+            val msg = (if (previousWrong) "Kode salah, coba lagi.\n" else "") +
+                if (isEmail) "Steam mengirim kode ke email ${hint ?: "kamu"}." else "Buka aplikasi Steam → Steam Guard, lalu masukkan kode 5 karakternya."
+            b.setTitle(if (isEmail) "Kode dari email" else "Kode Steam Guard")
+                .setMessage(msg)
+                .setView(padded(input))
+                .setPositiveButton("OK") { _, _ -> finish(input.text.toString().trim().uppercase().ifBlank { null }) }
+                .setNegativeButton("Batal") { _, _ -> finish(null) }
         }
     }
 }

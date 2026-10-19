@@ -6,8 +6,10 @@ import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.DownloadItem
 import `in`.dragonbra.javasteam.depotdownloader.data.PubFileItem
 import `in`.dragonbra.javasteam.enums.EResult
+import `in`.dragonbra.javasteam.steam.authentication.AuthPollResult
 import `in`.dragonbra.javasteam.steam.authentication.AuthSessionDetails
-import `in`.dragonbra.javasteam.steam.authentication.IAuthenticator
+import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesAuthSteamclient.EAuthSessionGuardType
+import `in`.dragonbra.javasteam.steam.authentication.AuthenticationException
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.License
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.callback.LicenseListCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.LogOnDetails
@@ -134,8 +136,41 @@ object SteamManager {
         }
     }
 
-    /** Login pertama kali pakai username + password (+ Steam Guard lewat [auth]). */
-    suspend fun loginWithPassword(ctx: Context, username: String, password: String, auth: IAuthenticator) =
+    /** Pertanyaan ke pengguna selama login (dijawab lewat dialog di layar). */
+    interface LoginUi {
+        /** true = setujui di aplikasi Steam, false = masukkan kode. */
+        suspend fun chooseApproveInApp(): Boolean
+        /** Ditampilkan sementara pengguna menyetujui di aplikasi Steam. true = sudah disetujui, false = batal. */
+        suspend fun waitApproved(): Boolean
+        /** Minta kode Steam Guard / email. null = batal. */
+        suspend fun askCode(isEmail: Boolean, hint: String?, previousWrong: Boolean): String?
+    }
+
+    class LoginCancelled : Exception("Login dibatalkan")
+
+    /** Jalankan [block]; kalau gagal karena koneksi putus, sambung ulang lalu coba lagi. */
+    private suspend fun <T> withReconnect(what: String, block: suspend () -> T): T {
+        var last: Exception? = null
+        repeat(4) { attempt ->
+            try {
+                if (client?.isConnected != true) connect()
+                return block()
+            } catch (e: AuthenticationException) {
+                throw e
+            } catch (e: Exception) {
+                last = e
+                AppLog.w("$what gagal (percobaan ${attempt + 1}): ${e.javaClass.simpleName} ${e.message ?: ""}")
+                delay(1500)
+            }
+        }
+        throw last ?: Exception("$what gagal")
+    }
+
+    /**
+     * Login pertama kali pakai username + password.
+     * Tahan terhadap koneksi yang putus saat aplikasi ditinggal ke aplikasi Steam untuk menyetujui login.
+     */
+    suspend fun loginWithPassword(ctx: Context, username: String, password: String, ui: LoginUi) =
         withContext(Dispatchers.IO) {
             connect()
             val details = AuthSessionDetails().apply {
@@ -143,15 +178,83 @@ object SteamManager {
                 this.password = password
                 persistentSession = true
                 deviceFriendlyName = "RimMod Updater (Android)"
-                authenticator = auth
+                authenticator = null // verifikasi ditangani sendiri di bawah
             }
-            val session = client!!.authentication.beginAuthSessionViaCredentials(details).await()
-            val poll = session.pollingWaitForResult().await()
-            val result = logOn(poll.accountName, poll.refreshToken)
+            val session = withReconnect("Mulai login") {
+                client!!.authentication.beginAuthSessionViaCredentials(details).await()
+            }
+            val confirmations = session.allowedConfirmations
+            val types = confirmations.map { it.confirmationType }
+            AppLog.i("Jenis verifikasi Steam: $types, interval ${session.pollingInterval}s")
+
+            if (!types.contains(EAuthSessionGuardType.k_EAuthSessionGuardType_None)) {
+                val canApprove = types.contains(EAuthSessionGuardType.k_EAuthSessionGuardType_DeviceConfirmation)
+                val codeConf = confirmations.firstOrNull {
+                    it.confirmationType == EAuthSessionGuardType.k_EAuthSessionGuardType_DeviceCode ||
+                        it.confirmationType == EAuthSessionGuardType.k_EAuthSessionGuardType_EmailCode
+                }
+                val approve = when {
+                    canApprove && codeConf != null -> ui.chooseApproveInApp()
+                    canApprove -> true
+                    else -> false
+                }
+                if (approve) {
+                    AppLog.i("Menunggu persetujuan di aplikasi Steam")
+                    if (!ui.waitApproved()) throw LoginCancelled()
+                } else if (codeConf != null) {
+                    val isEmail = codeConf.confirmationType == EAuthSessionGuardType.k_EAuthSessionGuardType_EmailCode
+                    var wrong = false
+                    while (true) {
+                        val code = ui.askCode(isEmail, codeConf.associatedMessage, wrong) ?: throw LoginCancelled()
+                        try {
+                            withReconnect("Kirim kode") {
+                                session.sendSteamGuardCode(code, codeConf.confirmationType).await()
+                            }
+                            AppLog.i("Kode Steam Guard diterima")
+                            break
+                        } catch (e: AuthenticationException) {
+                            AppLog.w("Kode ditolak: ${e.result}")
+                            if (e.result == EResult.InvalidLoginAuthCode || e.result == EResult.TwoFactorCodeMismatch) {
+                                wrong = true
+                            } else {
+                                throw e
+                            }
+                        }
+                    }
+                } else {
+                    throw Exception("Jenis verifikasi Steam belum didukung: $types")
+                }
+            }
+
+            // Cek status persetujuan tiap beberapa detik, sambung ulang kalau koneksi putus.
+            val interval = (session.pollingInterval * 1000).toLong().coerceIn(2000L, 10_000L)
+            val deadline = System.currentTimeMillis() + 180_000
+            var poll: AuthPollResult? = null
+            while (poll == null) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw Exception("Persetujuan login tidak diterima dalam 3 menit. Coba lagi.")
+                }
+                try {
+                    if (client?.isConnected != true) connect()
+                    poll = session.pollAuthSessionStatus().await()
+                } catch (e: AuthenticationException) {
+                    if (e.result == EResult.Expired || e.result == EResult.FileNotFound) {
+                        throw Exception("Permintaan login sudah kedaluwarsa. Coba login lagi.")
+                    }
+                    AppLog.w("Cek status login: ${e.message}")
+                } catch (e: Exception) {
+                    AppLog.w("Cek status login gagal (${e.javaClass.simpleName}), sambung ulang…")
+                }
+                if (poll == null) delay(interval)
+            }
+            val auth = poll!!
+            AppLog.i("Persetujuan login diterima untuk ${auth.accountName}")
+
+            val result = withReconnect("Logon") { logOn(auth.accountName, auth.refreshToken) }
             if (result != EResult.OK) throw Exception("Login Steam gagal: $result")
             prefs(ctx).edit()
-                .putString("account", poll.accountName)
-                .putString("token", poll.refreshToken)
+                .putString("account", auth.accountName)
+                .putString("token", auth.refreshToken)
                 .apply()
         }
 
