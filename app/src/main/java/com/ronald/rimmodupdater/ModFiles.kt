@@ -349,6 +349,109 @@ object ModFiles {
         return CompareResult(remote.size, diff)
     }
 
+
+    // ---------------------------------------------------------------- update sebagian (hanya file yang berubah)
+
+    data class UpdatePlan(
+        /** File yang perlu di-download (baru / berubah). */
+        val changed: List<RemoteFile>,
+        /** File lokal yang sudah tidak ada di versi Workshop (dihapus). */
+        val obsolete: List<Pair<String, Uri>>,
+    ) {
+        val isEmpty get() = changed.isEmpty() && obsolete.isEmpty()
+    }
+
+    /** Bandingkan folder mod dengan daftar file resmi; semua file dicek ukuran + hash supaya akurat. */
+    fun planFolderUpdate(ctx: Context, dir: DocumentFile, remote: List<RemoteFile>, onProgress: (String) -> Unit): UpdatePlan {
+        val local = mutableMapOf<String, Pair<Uri, Long>>()
+        listTree(ctx, dir.uri, DocumentsContract.getDocumentId(dir.uri), "", local)
+        val lower = local.entries.associate { it.key.lowercase() to it }
+        val changed = java.util.Collections.synchronizedList(mutableListOf<RemoteFile>())
+        val toHash = mutableListOf<Pair<RemoteFile, Uri>>()
+        val matched = mutableSetOf<String>()
+        remote.forEach { rf ->
+            val e = local[rf.path]?.let { rf.path to it } ?: lower[rf.path.lowercase()]?.let { it.key to it.value }
+            if (e == null) {
+                changed += rf
+            } else {
+                matched += e.first
+                when {
+                    e.second.second != rf.size -> changed += rf
+                    rf.size > 0 -> toHash += rf to e.second.first
+                }
+            }
+        }
+        if (toHash.isNotEmpty()) {
+            val done = java.util.concurrent.atomic.AtomicInteger(0)
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+            try {
+                pool.invokeAll(toHash.map { (rf, uri) ->
+                    java.util.concurrent.Callable {
+                        val h = try {
+                            ctx.contentResolver.openInputStream(uri)?.use { sha1(it) }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (h != rf.sha1) changed += rf
+                        val n = done.incrementAndGet()
+                        if (n % 50 == 0) onProgress("Memeriksa file lokal $n/${toHash.size}")
+                    }
+                }).forEach { it.get() }
+            } finally {
+                pool.shutdown()
+            }
+        }
+        val obsolete = local.filterKeys { it !in matched }.map { it.key to it.value.first }
+        return UpdatePlan(changed.toList(), obsolete)
+    }
+
+    /** Tulis file yang berubah ke folder mod (menimpa) dan hapus file yang sudah tidak dipakai. */
+    fun applyChanges(
+        ctx: Context,
+        target: DocumentFile,
+        src: File,
+        plan: UpdatePlan,
+        onProgress: (String) -> Unit,
+        onFraction: (Float) -> Unit = {},
+    ) {
+        val dirs = mutableMapOf("" to target)
+        fun dirFor(rel: String): DocumentFile {
+            dirs[rel]?.let { return it }
+            val parent = dirFor(rel.substringBeforeLast('/', ""))
+            val name = rel.substringAfterLast('/')
+            val d = parent.listFiles().firstOrNull { it.isDirectory && it.name.equals(name, true) }
+                ?: parent.createDirectory(name)
+                ?: throw Exception("Gagal membuat folder $rel")
+            dirs[rel] = d
+            return d
+        }
+        val total = plan.changed.size + plan.obsolete.size
+        var done = 0
+        plan.changed.forEach { rf ->
+            val f = File(src, rf.path)
+            if (!f.isFile) throw Exception("File hasil download tidak ada: ${rf.path}")
+            val parent = dirFor(rf.path.substringBeforeLast('/', ""))
+            val name = rf.path.substringAfterLast('/')
+            val doc = parent.findFile(name) ?: parent.createFile("application/octet-stream", name)
+                ?: throw Exception("Gagal membuat file ${rf.path}")
+            ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
+                f.inputStream().use { it.copyTo(out) }
+            } ?: throw Exception("Gagal menulis ${rf.path}")
+            onProgress("Menyalin ${rf.path}")
+            done++
+            onFraction(done.toFloat() / total.coerceAtLeast(1))
+        }
+        plan.obsolete.forEach { (rel, uri) ->
+            try {
+                DocumentsContract.deleteDocument(ctx.contentResolver, uri)
+            } catch (_: Exception) {
+            }
+            onProgress("Menghapus $rel")
+            done++
+            onFraction(done.toFloat() / total.coerceAtLeast(1))
+        }
+    }
+
     fun safeFolderName(name: String, id: String): String {
         val clean = name.replace(Regex("""[\\/:*?"<>|]"""), "").trim().take(60)
         return if (clean.isBlank()) id else clean

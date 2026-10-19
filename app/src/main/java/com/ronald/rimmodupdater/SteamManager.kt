@@ -332,13 +332,39 @@ object SteamManager {
         onFraction: (Float) -> Unit = {},
         onChunk: (Long) -> Unit = {},
         onFile: (String) -> Unit = {},
-    ) {
-        runDepot(ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus, onFraction = onFraction, onChunk = onChunk, onFile = onFile)
+        onlyFiles: Set<String>? = null,
+    ): Boolean {
+        val partial = runDepot(
+            ctx, workshopId, dir, manifestOnly = false, onStatus = onStatus, onFraction = onFraction,
+            onChunk = onChunk, onFile = onFile, onlyFiles = onlyFiles,
+        )
         val count = ModFiles.downloadedFiles(dir).size
         AppLog.i("Download $workshopId selesai: $count file")
         if (count == 0) {
             throw Exception("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.")
         }
+        return partial
+    }
+
+    /**
+     * Aktifkan fitur "hanya file tertentu" di DepotDownloader (ada di library tapi tidak bisa diatur dari luar).
+     * true = berhasil, false = tetap download semua file.
+     */
+    private fun restrictFiles(dd: DepotDownloader, files: Set<String>): Boolean = try {
+        val cfgField = DepotDownloader::class.java.getDeclaredField("config").apply { isAccessible = true }
+        val cfg = cfgField.get(dd)!!
+        val cls = cfg.javaClass
+        cls.getDeclaredField("usingFileList").apply { isAccessible = true }.setBoolean(cfg, true)
+        @Suppress("UNCHECKED_CAST")
+        val set = cls.getDeclaredField("filesToDownload").apply { isAccessible = true }.get(cfg) as java.util.HashSet<String>
+        set.clear()
+        set.addAll(files)
+        val ok = cls.getDeclaredField("usingFileList").apply { isAccessible = true }.getBoolean(cfg)
+        AppLog.i("Mode file tertentu: ${if (ok) "aktif" else "GAGAL"} (${files.size} file)")
+        ok
+    } catch (e: Throwable) {
+        AppLog.e("Mode file tertentu gagal diaktifkan, download semua file", e)
+        false
     }
 
     /** Ambil daftar file resmi (manifest) sebuah mod tanpa men-download isinya. */
@@ -505,7 +531,8 @@ object SteamManager {
         onFraction: (Float) -> Unit = {},
         onChunk: (Long) -> Unit = {},
         onFile: (String) -> Unit = {},
-    ) = withContext(Dispatchers.IO) {
+        onlyFiles: Set<String>? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
         // Sambung ulang otomatis (pakai token tersimpan) kalau koneksi sempat putus.
         if (!loggedIn || client?.isConnected != true) ensureLoggedIn(ctx)
         val c = client ?: throw LoginRequired()
@@ -555,6 +582,8 @@ object SteamManager {
             if (err != null) done.completeExceptionally(err) else done.complete(Unit)
         }
 
+        val partial = onlyFiles != null && restrictFiles(dd, onlyFiles)
+
         try {
             dd.add(
                 PubFileItem(
@@ -582,5 +611,6 @@ object SteamManager {
             } catch (_: Exception) {
             }
         }
+        partial
     }
 }

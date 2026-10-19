@@ -774,7 +774,8 @@ class MainActivity : AppCompatActivity() {
         when {
             msg.startsWith("Menyalin ") -> panel.log("COPY", msg.removePrefix("Menyalin "), "✓")
             msg.startsWith("Mengemas ") -> panel.log("ZIP", msg.removePrefix("Mengemas "), "✓")
-            msg.startsWith("Menghapus") -> panel.log("CLEAN", "hapus file versi lama")
+            msg.startsWith("Menghapus file lama") -> panel.log("CLEAN", "hapus file versi lama")
+            msg.startsWith("Menghapus ") -> panel.log("DEL", msg.removePrefix("Menghapus "), "✓")
         }
     }
 
@@ -798,14 +799,48 @@ class MainActivity : AppCompatActivity() {
                     if (m.remoteTitle == null) m.remoteTitle = it.title
                 }
             }
+            // Untuk folder mod yang sudah ada: cari dulu file mana saja yang berubah, lalu download itu saja.
+            var plan: ModFiles.UpdatePlan? = null
+            var target: DocumentFile? = null
+            if (m.sourceType == "folder") {
+                target = ModFiles.resolveFolder(this@MainActivity, m)
+                    ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+                if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
+                panel.badge("CEK ISI")
+                onProgress("Ambil daftar file dari Steam…")
+                val mfDir = File(cacheDir, "mf1/${m.workshopId}")
+                try {
+                    val remote = SteamManager.fetchManifest(this@MainActivity, m.workshopId.toLong(), mfDir) {}
+                    panel.log("MANIFEST", "${remote.size} files", "OK")
+                    m.remoteFileCount = remote.size
+                    onProgress("Membandingkan dengan file di HP…")
+                    val p = ModFiles.planFolderUpdate(this@MainActivity, target, remote, onProgress)
+                    plan = p
+                    panel.log("PLAN", "${p.changed.size} file berubah · ${p.obsolete.size} dihapus", "OK")
+                    AppLog.i("Rencana update ${m.workshopId}: ${p.changed.size} berubah, ${p.obsolete.size} usang (dari ${remote.size})")
+                } catch (e: Exception) {
+                    AppLog.e("Cek isi sebelum update gagal, download semua file", e)
+                    panel.log("PLAN", "gagal (${e.message}), download semua", error = true)
+                } finally {
+                    mfDir.deleteRecursively()
+                }
+                if (plan != null && plan.isEmpty) {
+                    m.updateAvailable = false
+                    m.installedVersion = m.remoteVersion
+                    m.status = "Sudah terbaru ✓ (isi sama dengan Workshop)"
+                    onFraction(1f)
+                    return@withContext
+                }
+            }
+            panel.badge("DOWNLOAD")
             onProgress("Download dari Steam…")
             // Download = 0..80%, salin ke folder = 80..100%
             val t0 = System.currentTimeMillis()
             val bytes = java.util.concurrent.atomic.AtomicLong(0)
             val files = java.util.concurrent.atomic.AtomicInteger(0)
             val chunks = java.util.concurrent.atomic.AtomicInteger(0)
-            val size = m.remoteSize
-            val fileTotal = m.remoteFileCount
+            val size = plan?.changed?.sumOf { it.size }?.takeIf { it > 0 } ?: m.remoteSize
+            val fileTotal = plan?.changed?.size ?: m.remoteFileCount
             // kecepatan dihitung dari 4 detik terakhir (bukan sejak mulai, karena awal-awal ada proses login/daftar file)
             val samples = ArrayDeque<Pair<Long, Long>>()
             fun dlStats() {
@@ -827,10 +862,11 @@ class MainActivity : AppCompatActivity() {
                 )
                 onProgress("Download ${fmtSize(got)}" + if (size > 0) " / ${fmtSize(size)}" else "")
             }
-            SteamManager.downloadMod(
+            val partial = SteamManager.downloadMod(
                 this@MainActivity,
                 m.workshopId.toLong(),
                 work,
+                onlyFiles = plan?.changed?.map { it.path }?.toSet(),
                 onStatus = {},
                 onFraction = { f ->
                     onFraction(f * 0.8f)
@@ -862,14 +898,17 @@ class MainActivity : AppCompatActivity() {
                     fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
                 )
             }
-            ModFiles.ensurePublishedId(work, m.workshopId)
+            if (!partial) ModFiles.ensurePublishedId(work, m.workshopId)
 
             when (m.sourceType) {
                 "folder" -> {
-                    val target = ModFiles.resolveFolder(this@MainActivity, m)
-                        ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
-                    if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
-                    ModFiles.replaceFolder(this@MainActivity, target, work, copyLog(onProgress), copyFrac)
+                    val dir = target!!
+                    if (partial && plan != null) {
+                        // hanya tulis file yang berubah + hapus file usang
+                        ModFiles.applyChanges(this@MainActivity, dir, work, plan, copyLog(onProgress), copyFrac)
+                    } else {
+                        ModFiles.replaceFolder(this@MainActivity, dir, work, copyLog(onProgress), copyFrac)
+                    }
                 }
                 "zip" -> {
                     ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, copyLog(onProgress), copyFrac)
