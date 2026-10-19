@@ -26,6 +26,8 @@ data class ModEntry(
     var installedVersion: String = "",
     /** Versi konten terbaru di Workshop. */
     var remoteVersion: String = "",
+    /** Ukuran mod di Workshop (byte). */
+    var remoteSize: Long = 0,
 ) {
     val displayName: String get() = remoteTitle?.takeIf { it.isNotBlank() } ?: name
 
@@ -43,6 +45,7 @@ data class ModEntry(
         put("updateAvailable", updateAvailable)
         put("installedVersion", installedVersion)
         put("remoteVersion", remoteVersion)
+        put("remoteSize", remoteSize)
     }
 
     companion object {
@@ -60,6 +63,7 @@ data class ModEntry(
             updateAvailable = o.optBoolean("updateAvailable"),
             installedVersion = o.optString("installedVersion"),
             remoteVersion = o.optString("remoteVersion"),
+            remoteSize = o.optLong("remoteSize"),
         )
     }
 }

@@ -306,6 +306,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun fmtSize(b: Long): String = when {
+        b >= 1024L * 1024 * 1024 -> String.format(Locale.US, "%.2f GB", b / (1024.0 * 1024 * 1024))
+        b >= 1024L * 1024 -> String.format(Locale.US, "%.1f MB", b / (1024.0 * 1024))
+        b >= 1024 -> String.format(Locale.US, "%.0f KB", b / 1024.0)
+        else -> "$b B"
+    }
+
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
 
     private fun renderList() {
@@ -350,7 +357,8 @@ class MainActivity : AppCompatActivity() {
                 m.remoteVersion.isEmpty() || m.installedVersion == m.remoteVersion -> "sama dengan Workshop"
                 else -> "lebih lama dari Workshop"
             }
-            text = "ID ${m.workshopId.ifBlank { "?" }} • sumber: $src\nWorkshop diupdate: ${fmt(m.remoteTime)}\nVersi punyamu: $ver"
+            val size = if (m.remoteSize > 0) " • ${fmtSize(m.remoteSize)}" else ""
+            text = "ID ${m.workshopId.ifBlank { "?" }} • sumber: $src$size\nWorkshop diupdate: ${fmt(m.remoteTime)}\nVersi punyamu: $ver"
             textSize = 12f
             alpha = 0.8f
         })
@@ -559,6 +567,7 @@ class MainActivity : AppCompatActivity() {
                             m.remoteTitle = d.title
                             m.remoteTime = d.timeUpdated
                             m.remoteVersion = d.contentId
+                            m.remoteSize = d.fileSize
                             when {
                                 m.installedVersion.isNotEmpty() -> {
                                     m.updateAvailable = m.installedVersion != d.contentId
@@ -670,7 +679,16 @@ class MainActivity : AppCompatActivity() {
             toast("Tidak ada mod yang perlu diupdate. Tekan \"Cek update\" dulu.")
             return
         }
-        updateMods(list)
+        val total = list.sumOf { it.remoteSize }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Update ${list.size} mod?")
+            .setMessage(
+                (if (total > 0) "Total download sekitar ${fmtSize(total)}.\n\n" else "") +
+                    "Biarkan aplikasi tetap terbuka sampai selesai."
+            )
+            .setPositiveButton("Update") { _, _ -> updateMods(list) }
+            .setNegativeButton("Batal", null)
+            .show()
     }
 
     private fun updateMods(list: List<ModEntry>) {
@@ -695,6 +713,8 @@ class MainActivity : AppCompatActivity() {
             }
             refreshSteamStatus()
             var ok = 0
+            val total = list.sumOf { it.remoteSize }
+            if (total > 0) AppLog.i("Update ${list.size} mod, total ${fmtSize(total)}")
             list.forEachIndexed { i, m ->
                 val prefix = "[${i + 1}/${list.size}] ${m.displayName}: "
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
@@ -730,13 +750,25 @@ class MainActivity : AppCompatActivity() {
             if (m.remoteVersion.isEmpty()) {
                 WorkshopApi.getDetails(listOf(m.workshopId))[m.workshopId]?.let {
                     m.remoteVersion = it.contentId
+                    m.remoteSize = it.fileSize
                     m.remoteTime = it.timeUpdated
                     if (m.remoteTitle == null) m.remoteTitle = it.title
                 }
             }
             onProgress("Download dari Steam…")
             // Download = 0..80%, salin ke folder = 80..100%
-            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, onProgress) { onFraction(it * 0.8f) }
+            var lastMb = -1L
+            SteamManager.downloadMod(this@MainActivity, m.workshopId.toLong(), work, {}) { f ->
+                onFraction(f * 0.8f)
+                if (m.remoteSize > 0) {
+                    val got = (f * m.remoteSize).toLong()
+                    val step = got / (256 * 1024)
+                    if (step != lastMb) {
+                        lastMb = step
+                        onProgress("Download ${fmtSize(got)} / ${fmtSize(m.remoteSize)}")
+                    }
+                }
+            }
             val copyFrac: (Float) -> Unit = { onFraction(0.8f + it * 0.2f) }
             ModFiles.ensurePublishedId(work, m.workshopId)
 
