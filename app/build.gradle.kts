@@ -89,6 +89,7 @@ dependencies {
     implementation("in.dragonbra:javasteam:1.8.0")
     implementation("in.dragonbra:javasteam-depotdownloader:1.8.0")
     implementation("com.google.protobuf:protobuf-java:4.31.1")
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
     implementation("org.bouncycastle:bcprov-jdk18on:1.83")
     implementation("org.tukaani:xz:1.11")
     implementation("com.github.luben:zstd-jni:1.5.7-6@aar")

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Beberapa server CDN Steam (mis. alibaba.cdn.steampipe.steamcontent.com) memakai http biasa.
+     Isi potongan data sudah dienkripsi (kunci depot) dan dicek SHA-1 oleh Steam, jadi aman diizinkan. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">steamcontent.com</domain>
+        <domain includeSubdomains="true">steampipe.akamaized.net</domain>
+        <domain includeSubdomains="true">steamstatic.com</domain>
+    </domain-config>
+</network-security-config>

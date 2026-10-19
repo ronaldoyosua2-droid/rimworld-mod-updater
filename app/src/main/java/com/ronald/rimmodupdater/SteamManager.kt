@@ -76,9 +76,41 @@ object SteamManager {
 
     fun savedAccount(ctx: Context): String? = prefs(ctx).getString("account", null)
 
+    /**
+     * Klien HTTP sendiri untuk download dari CDN Steam:
+     * - banyak koneksi disimpan siap pakai (bawaan cuma 5, padahal server CDN ~21) supaya tidak jabat tangan HTTPS terus,
+     * - executor yang tidak bisa dimatikan, karena JavaSteam mematikan executor klien bersama saat sesi download ditutup.
+     */
+    private fun fastConfig(): `in`.dragonbra.javasteam.steam.steamclient.configuration.SteamConfiguration {
+        val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "steam-http").apply { isDaemon = true } }
+        val neverShutdown = object : java.util.concurrent.AbstractExecutorService() {
+            override fun execute(command: Runnable) = pool.execute(command)
+            override fun shutdown() {}
+            override fun shutdownNow(): MutableList<Runnable> = mutableListOf()
+            override fun isShutdown() = false
+            override fun isTerminated() = false
+            override fun awaitTermination(timeout: Long, unit: java.util.concurrent.TimeUnit) = false
+        }
+        val dispatcher = okhttp3.Dispatcher(neverShutdown).apply {
+            maxRequests = 96
+            maxRequestsPerHost = 8
+        }
+        val http = okhttp3.OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(okhttp3.ConnectionPool(64, 5, java.util.concurrent.TimeUnit.MINUTES))
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+        return `in`.dragonbra.javasteam.steam.steamclient.configuration.SteamConfiguration.create { b ->
+            b.withHttpClient(http)
+        }
+    }
+
     private fun ensureClient() {
         if (client != null) return
-        val c = SteamClient()
+        val c = SteamClient(fastConfig())
         val m = CallbackManager(c)
         user = c.getHandler(SteamUser::class.java)
 
@@ -487,7 +519,7 @@ object SteamManager {
             licenses = licenses,
             debug = true,
             useLanCache = false,
-            maxDownloads = 24, // potongan mod kecil-kecil: banyak permintaan paralel = jauh lebih cepat
+            maxDownloads = 48, // potongan mod kecil-kecil: banyak permintaan paralel = jauh lebih cepat
             maxDecompress = 4,
             maxFileWrites = 1,
         )
