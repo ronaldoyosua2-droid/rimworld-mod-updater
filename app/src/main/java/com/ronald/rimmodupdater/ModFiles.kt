@@ -76,6 +76,45 @@ object ModFiles {
         return root.child(entry.subPath)
     }
 
+    /** Hasil scan ulang per folder induk (disimpan sebentar supaya tidak scan berkali-kali). */
+    private val rescanCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<ScannedMod>>>()
+
+    /**
+     * Cari folder mod. Kalau tidak ketemu, scan ulang folder induknya dulu (mungkin foldernya
+     * diganti nama / dipindah) dan cocokkan lewat nama folder, id mod.info, ID Workshop, atau judul.
+     * Kalau ketemu dengan nama lain, [entry].subPath diperbarui. Null = benar-benar tidak ada.
+     */
+    fun locateFolder(ctx: Context, entry: ModEntry): DocumentFile? {
+        resolveFolder(ctx, entry)?.takeIf { it.exists() }?.let { return it }
+        val src = entry.sourceUri ?: return null
+        if (entry.subPath.isEmpty()) return null
+        val uri = Uri.parse(src)
+        val now = System.currentTimeMillis()
+        val scanned = rescanCache[src]?.takeIf { now - it.first < 2 * 60_000 }?.second ?: try {
+            (if (entry.game == Game.ZOMBOID.key) scanZomboid(ctx, uri) else scanTree(ctx, uri)).also {
+                rescanCache[src] = now to it
+                AppLog.i("Scan ulang ${it.size} folder mod di $src")
+            }
+        } catch (e: Exception) {
+            AppLog.w("Scan ulang gagal: ${e.message}")
+            return null
+        }
+        fun norm(x: String) = x.trim().lowercase()
+        val hit = scanned.firstOrNull { norm(it.subPath) == norm(entry.subPath) }
+            ?: scanned.firstOrNull { entry.modId.isNotBlank() && norm(it.modId) == norm(entry.modId) }
+            ?: scanned.firstOrNull { entry.game != Game.ZOMBOID.key && entry.workshopId.isNotBlank() && it.workshopId == entry.workshopId }
+            ?: scanned.firstOrNull { norm(it.name) == norm(entry.name) }
+            ?: return null
+        val old = entry.subPath
+        entry.subPath = hit.subPath
+        val dir = resolveFolder(ctx, entry)
+        if (dir == null) { entry.subPath = old; return null }
+        if (old != hit.subPath) AppLog.i("Folder mod pindah: $old → ${hit.subPath}")
+        return dir
+    }
+
+    fun clearRescanCache() = rescanCache.clear()
+
     // ---------------------------------------------------------------- zip
 
     fun scanZip(ctx: Context, uri: Uri, fileName: String?): ScannedMod? {

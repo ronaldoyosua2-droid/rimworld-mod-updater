@@ -753,8 +753,12 @@ class MainActivity : AppCompatActivity() {
                 val ok = withContext(Dispatchers.IO) {
                     when (m.sourceType) {
                         "folder" -> {
-                            val dir = ModFiles.resolveFolder(this@MainActivity, m)
-                                ?: throw Exception("Folder mod tidak ditemukan (mungkin sudah terhapus)")
+                            val dir = ModFiles.locateFolder(this@MainActivity, m)
+                            if (dir == null) {
+                                // sudah dicek ulang: foldernya memang tidak ada → cukup buang dari daftar
+                                panel.log("SCAN", "folder ${m.subPath} tidak ada (sudah dicek ulang)")
+                                return@withContext true
+                            }
                             panel.log("RM", "-rf ${m.subPath.ifBlank { dir.name ?: "mod" }}/")
                             dir.delete()
                         }
@@ -1158,6 +1162,7 @@ class MainActivity : AppCompatActivity() {
                 // Mod yang versinya belum diketahui: bandingkan isi file dengan daftar file resmi di Steam.
                 if (needContent.isNotEmpty()) {
                     AppLog.i("${needContent.size} mod perlu dicek isinya")
+                    ModFiles.clearRescanCache()
                     showProgress("${needContent.size} mod perlu dicek isinya, butuh login Steam…")
                     if (!ensureSteam()) {
                         needContent.forEach {
@@ -1245,9 +1250,9 @@ class MainActivity : AppCompatActivity() {
                                     panel.log("CLEAN", "${m.displayName}: duplikat lama dibuang", "OK")
                                 } else {
                                     AppLog.w("Cek isi ${m.workshopId} (${m.displayName}): folder tidak ditemukan ${m.sourceUri} / ${m.subPath}")
-                                    panel.log("FAIL", "${m.displayName}: folder tidak ditemukan", error = true)
+                                    panel.log("FAIL", "${m.displayName}: folder tidak ada (scan ulang)", error = true)
                                     m.updateAvailable = false
-                                    m.status = "Gagal: folder mod tidak ditemukan (sudah dihapus/dipindah?). Tekan DEL, atau tambah ulang foldernya."
+                                    m.status = "Gagal: folder mod tidak ada di HP (sudah dicek ulang). Tekan DEL untuk buang dari daftar."
                                 }
                             } catch (e: Exception) {
                                 AppLog.e("Cek isi ${m.workshopId} (${m.displayName}) gagal", e)
@@ -1302,7 +1307,7 @@ class MainActivity : AppCompatActivity() {
         val remote = scopeFor(m, remoteAll)
         when (m.sourceType) {
             "folder" -> {
-                val dir = ModFiles.resolveFolder(this@MainActivity, m)
+                val dir = ModFiles.locateFolder(this@MainActivity, m)
                     ?: throw FolderMissing()
                 ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
             }
@@ -1431,7 +1436,7 @@ class MainActivity : AppCompatActivity() {
             var plan: ModFiles.UpdatePlan? = null
             var target: DocumentFile? = null
             if (m.sourceType == "folder") {
-                target = ModFiles.resolveFolder(this@MainActivity, m)
+                target = ModFiles.locateFolder(this@MainActivity, m)
                     ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
                 if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
                 panel.badge("CEK ISI")
