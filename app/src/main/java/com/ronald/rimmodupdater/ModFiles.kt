@@ -20,6 +20,7 @@ object ModFiles {
         val localTime: Long,
         val subPath: String = "",
         val zipPrefix: String = "",
+        val modId: String = "",
     )
 
     private val nameRegex = Regex("""<name>\s*(.*?)\s*</name>""", RegexOption.DOT_MATCHES_ALL)
@@ -474,14 +475,17 @@ object ModFiles {
         return out
     }
 
-    private fun readModInfoName(ctx: Context, treeUri: Uri, docId: String): String? = try {
+    /** Baca "name=" dan "id=" dari mod.info. */
+    private fun readModInfo(ctx: Context, treeUri: Uri, docId: String): Pair<String?, String?> = try {
         ctx.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(treeUri, docId))
             ?.bufferedReader()?.use { r ->
-                r.readLines().firstOrNull { it.trim().startsWith("name=", ignoreCase = true) }
+                val lines = r.readLines().map { it.trim() }
+                fun v(key: String) = lines.firstOrNull { it.startsWith("$key=", ignoreCase = true) }
                     ?.substringAfter('=')?.trim()?.takeIf { it.isNotBlank() }
-            }
+                v("name") to v("id")
+            } ?: (null to null)
     } catch (_: Exception) {
-        null
+        null to null
     }
 
     /** Cari mod.info di folder mod Zomboid (di akar folder, atau di subfolder versi seperti "42"/"common"). */
@@ -503,14 +507,16 @@ object ModFiles {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         findModInfo(ctx, treeUri, rootId)?.let { info ->
             val folder = DocumentFile.fromTreeUri(ctx, treeUri)?.name ?: "mod"
-            return listOf(ScannedMod(readModInfoName(ctx, treeUri, info) ?: folder, null, 0, subPath = ""))
+            val (name, id) = readModInfo(ctx, treeUri, info)
+            return listOf(ScannedMod(name ?: folder, null, 0, subPath = "", modId = id ?: ""))
         }
         val dirs = children(ctx, treeUri, rootId).filter { it.isDir }
         val out = mutableListOf<ScannedMod>()
         dirs.forEachIndexed { i, d ->
             if (i % 10 == 0) onProgress("Membaca folder mod ${i + 1}/${dirs.size}")
             val info = findModInfo(ctx, treeUri, d.id) ?: return@forEachIndexed
-            out += ScannedMod(readModInfoName(ctx, treeUri, info) ?: d.name, null, 0, subPath = d.name)
+            val (name, id) = readModInfo(ctx, treeUri, info)
+            out += ScannedMod(name ?: d.name, null, 0, subPath = d.name, modId = id ?: "")
         }
         return out
     }

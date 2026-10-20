@@ -539,7 +539,8 @@ class MainActivity : AppCompatActivity() {
     private fun doRenderList() {
         lastRender = android.os.SystemClock.uptimeMillis()
         listContainer.removeAllViews()
-        val list = visible
+        // urutan: merah (gagal / ID belum ketemu) → kuning (ada update) → lainnya
+        val list = visible.sortedBy { severity(it) }
         val anim = animateList
         animateList = false
         if (list.isEmpty()) {
@@ -564,6 +565,15 @@ class MainActivity : AppCompatActivity() {
             listContainer.addView(card)
             if (anim && i < 14) card.reveal(120L + i * 70L, 380)
         }
+    }
+
+    private fun isFailed(m: ModEntry) =
+        m.status.startsWith("Gagal") || m.status.startsWith("Error") || m.status.startsWith("ID Workshop belum")
+
+    private fun severity(m: ModEntry) = when {
+        isFailed(m) -> 0
+        m.updateAvailable -> 1
+        else -> 2
     }
 
     private fun modCard(m: ModEntry): ScanReveal {
@@ -654,6 +664,17 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ salin & cari
 
+    /** Variasi kata kunci pencarian: judul mod.info, nama folder, nama folder dipisah per kata, id mod. */
+    private fun searchQueries(m: ModEntry): List<String> {
+        fun split(s: String) = s.replace(Regex("""([a-z])([A-Z])"""), "$1 $2")
+            .replace(Regex("""([A-Za-z])(\d)"""), "$1 $2")
+            .replace(Regex("""[_\-.]+"""), " ").trim()
+        return listOf(m.name, m.subPath, split(m.subPath), m.modId, split(m.modId), split(m.name))
+            .map { it.trim() }
+            .filter { it.length >= 3 }
+            .distinctBy { it.lowercase() }
+    }
+
     private fun copyText(text: String, label: String) {
         val cm = getSystemService(android.content.ClipboardManager::class.java)
         cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
@@ -676,11 +697,13 @@ class MainActivity : AppCompatActivity() {
         val items = mutableListOf<Pair<String, () -> Unit>>()
         items += "Salin nama mod" to { copyText(m.displayName, "Nama mod") }
         if (m.subPath.isNotBlank() && m.subPath != m.displayName) items += "Salin nama folder" to { copyText(m.subPath, "Nama folder") }
+        if (m.modId.isNotBlank()) items += "Salin id mod (mod.info)" to { copyText(m.modId, "ID mod") }
         if (m.workshopId.isNotBlank()) items += "Salin ID Workshop" to { copyText(m.workshopId, "ID Workshop") }
         items += "Cari di Steam Workshop" to { openUrl(workshopSearchUrl(m.displayName)) }
         if (m.workshopId.isNotBlank()) items += "Buka halaman Workshop" to {
             openUrl("https://steamcommunity.com/sharedfiles/filedetails/?id=${m.workshopId}")
         }
+        if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += "Cari ID otomatis lagi" to { discoverZomboidIds(listOf(m)) }
         items += "Isi / ubah ID Workshop" to { askEditId(m) }
         MaterialAlertDialogBuilder(this)
             .setTitle(m.displayName)
@@ -846,6 +869,7 @@ class MainActivity : AppCompatActivity() {
                 subPath = it.subPath,
                 status = "Mencari ID Workshop…",
                 game = Game.ZOMBOID.key,
+                modId = it.modId,
             ))
         }
         store.save(mods)
@@ -882,13 +906,13 @@ class MainActivity : AppCompatActivity() {
                     pool.invokeAll(list.map { m ->
                         java.util.concurrent.Callable {
                             val ids = LinkedHashSet<Long>()
-                            for (q in listOf(m.name, m.subPath).distinct().filter { it.isNotBlank() }) {
+                            for (q in searchQueries(m)) {
                                 try {
                                     WorkshopSearch.search(game.appId, q, 4).forEach { ids += it.toLong() }
                                 } catch (e: Exception) {
                                     AppLog.w("Cari '$q' gagal: ${e.message}")
                                 }
-                                if (ids.size >= 4) break
+                                if (ids.size >= 8) break
                             }
                             cands[m] = ids.toList()
                             val n = done.incrementAndGet()
@@ -909,7 +933,7 @@ class MainActivity : AppCompatActivity() {
             panel.title("Cocokkan isi item Workshop")
             val mfDir = File(cacheDir, "mfz")
             var matched = 0
-            for (round in 0 until 3) {
+            for (round in 0 until 5) {
                 val pending = list.filter { it.workshopId.isBlank() }
                 if (pending.isEmpty()) break
                 val ids = pending.mapNotNull { cands[it]?.getOrNull(round) }.filter { !manifestCache.containsKey(it) }.distinct()
@@ -919,7 +943,7 @@ class MainActivity : AppCompatActivity() {
                         val res = SteamManager.fetchManifests(
                             this@MainActivity, ids, mfDir,
                             onStatus = { progress(it) },
-                            onFraction = { f -> setFraction(0.3f + 0.7f * (round + f) / 3f) },
+                            onFraction = { f -> setFraction(0.3f + 0.7f * (round + f) / 5f) },
                             onManifest = { id, r ->
                                 r.onSuccess { manifestCache[id] = it; panel.log("MANIFEST", "$id · ${it.size} files", "OK") }
                                 r.onFailure { panel.log("MANIFEST", "$id · ${it.message}", error = true) }
@@ -948,8 +972,12 @@ class MainActivity : AppCompatActivity() {
             }
             mfDir.deleteRecursively()
             list.filter { it.workshopId.isBlank() }.forEach {
-                it.status = "ID Workshop belum ketemu. Tekan EDIT ID untuk isi manual."
-                panel.log("MISS", it.name, error = true)
+                val n = cands[it].orEmpty().size
+                it.status = if (n == 0)
+                    "ID Workshop belum ketemu: tidak ada hasil pencarian. Tekan lama judul → Cari di Workshop."
+                else
+                    "ID Workshop belum ketemu: $n hasil dicek, isinya tidak cocok. Tekan lama judul → Cari di Workshop."
+                panel.log("MISS", "${it.name} (${if (n == 0) "no result" else "$n no match"})", error = true)
             }
             store.save(mods)
             AppLog.i("Cari ID Zomboid: $matched/${list.size} cocok dalam ${(System.currentTimeMillis() - t0) / 1000} dtk")

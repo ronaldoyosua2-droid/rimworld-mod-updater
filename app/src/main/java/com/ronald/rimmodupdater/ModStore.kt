@@ -34,6 +34,8 @@ data class ModEntry(
     var game: String = "rimworld",
     /** Awalan folder mod ini di dalam item Workshop (Zomboid: "mods/<Folder>/", RimWorld: ""). */
     var contentPrefix: String = "",
+    /** Zomboid: "id=" dari mod.info (dipakai untuk mencari ID Workshop). */
+    var modId: String = "",
 ) {
     /** Zomboid: satu item Workshop bisa berisi banyak mod, jadi tampilkan nama mod lokal. */
     val displayName: String
@@ -57,6 +59,7 @@ data class ModEntry(
         put("remoteFileCount", remoteFileCount)
         put("game", game)
         put("contentPrefix", contentPrefix)
+        put("modId", modId)
     }
 
     companion object {
@@ -78,6 +81,7 @@ data class ModEntry(
             remoteFileCount = o.optInt("remoteFileCount"),
             game = o.optString("game", "rimworld").ifBlank { "rimworld" },
             contentPrefix = o.optString("contentPrefix"),
+            modId = o.optString("modId"),
         )
     }
 }
