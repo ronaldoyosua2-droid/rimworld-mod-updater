@@ -29,6 +29,24 @@ class ScanReveal(ctx: Context) : FrameLayout(ctx) {
         clipChildren = true
     }
 
+    /** Efek "render": garis hijau tipis turun dari atas ke bawah (dipakai di panel pilih game). */
+    fun revealLine(delayMs: Long = 0, durationMs: Long = 380) {
+        animator?.cancel()
+        alpha = 1f
+        progress = 0f
+        invalidate()
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            startDelay = delayMs
+            duration = durationMs
+            interpolator = DecelerateInterpolator(1.2f)
+            addUpdateListener {
+                progress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
     /** Muncul perlahan (memudar masuk), tanpa garis turun. */
     fun reveal(delayMs: Long = 0, durationMs: Long = 420) {
         animator?.cancel()

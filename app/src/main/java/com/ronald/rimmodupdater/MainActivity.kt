@@ -392,7 +392,7 @@ class MainActivity : AppCompatActivity() {
             gameList.addView(wrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = px(10)
             })
-            if (animate) wrap.reveal(120L + idx * 120L, 380)
+            if (animate) wrap.revealLine(120L + idx * 120L, 380)
         }
         val acc = SteamManager.accountName ?: SteamManager.savedAccount(this)
         drawerFooter.text = "> steam: ${acc ?: "-"} ${if (SteamManager.loggedIn) "● online" else "○ offline"}\n> ${AppLog.buildLabel}"
