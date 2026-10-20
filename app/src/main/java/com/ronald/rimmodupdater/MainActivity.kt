@@ -643,10 +643,10 @@ class MainActivity : AppCompatActivity() {
             10.5f, Hx.DIM,
         ).apply { setLineSpacing(px(2).toFloat(), 1f); setPadding(0, px(4), 0, 0) })
         val statusText = when {
-            m.updateAvailable -> "!! " + m.status
-            StatusKind.isOk(m.status) -> "✓ " + m.status
-            StatusKind.isFailed(m.status) -> "✗ " + m.status
-            else -> "> " + m.status
+            m.updateAvailable -> "!! " + StatusText.localize(m.status)
+            StatusKind.isOk(m.status) -> "✓ " + StatusText.localize(m.status)
+            StatusKind.isFailed(m.status) -> "✗ " + StatusText.localize(m.status)
+            else -> "> " + StatusText.localize(m.status)
         }
         box.addView(term(statusText, 11.5f, accent, bold = true).apply {
             setPadding(0, px(6), 0, px(6))
