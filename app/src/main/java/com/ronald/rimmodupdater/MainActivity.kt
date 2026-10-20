@@ -844,10 +844,18 @@ class MainActivity : AppCompatActivity() {
             // buang duplikat lain (sisa tambah folder sebelumnya)
             for (i in mods.indices.reversed()) if (i != existing && same(mods[i])) mods.removeAt(i)
             val oldSameFolder = (old.sourceUri == entry.sourceUri || zomboid) && old.subPath.equals(entry.subPath, ignoreCase = true)
-            if (oldSameFolder && entry.workshopId.isBlank()) {
+            if (oldSameFolder && entry.workshopId.isBlank() && old.workshopId.isNotBlank()) {
+                // folder yang sama ditambah ulang: ID (termasuk yang diisi manual) & info versi tetap dipakai
                 entry.workshopId = old.workshopId
                 entry.contentPrefix = old.contentPrefix
                 entry.installedVersion = old.installedVersion
+                entry.remoteVersion = old.remoteVersion
+                entry.remoteTitle = old.remoteTitle
+                entry.remoteTime = old.remoteTime
+                entry.remoteSize = old.remoteSize
+                entry.remoteFileCount = old.remoteFileCount
+                entry.updateAvailable = old.updateAvailable
+                entry.status = old.status
             }
             mods[mods.indexOfFirst { it === old }] = entry
         } else {
@@ -1033,7 +1041,8 @@ class MainActivity : AppCompatActivity() {
             panel.badge(tr("SELESAI", "DONE"))
             panel.fraction(1f)
             setBusy(false)
-            if (matched > 0) checkUpdates()
+            // cek update juga untuk mod yang ID-nya sudah tersimpan sebelumnya
+            if (matched > 0 || visible.any { it.workshopId.isNotBlank() }) checkUpdates()
         }
     }
 
