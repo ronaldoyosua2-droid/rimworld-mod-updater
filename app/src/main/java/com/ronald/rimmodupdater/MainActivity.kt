@@ -785,7 +785,7 @@ class MainActivity : AppCompatActivity() {
             for (round in 0 until 3) {
                 val pending = list.filter { it.workshopId.isBlank() }
                 if (pending.isEmpty()) break
-                val ids = pending.mapNotNull { cands[it]?.getOrNull(round) }.filter { it !in manifestCache }.distinct()
+                val ids = pending.mapNotNull { cands[it]?.getOrNull(round) }.filter { !manifestCache.containsKey(it) }.distinct()
                 if (ids.isNotEmpty()) {
                     panel.caption("VERIFY · PUTARAN ${round + 1} · ${ids.size} ITEM")
                     try {
@@ -1012,7 +1012,7 @@ class MainActivity : AppCompatActivity() {
                         var mfDone = 0
                         // pakai daftar file yang baru diambil (mis. saat cari ID) kalau masih segar
                         val fresh = System.currentTimeMillis() - manifestCacheTime < 15 * 60_000
-                        val cached = if (fresh) needContent.map { it.workshopId.toLong() }.filter { it in manifestCache }.toSet() else emptySet()
+                        val cached = if (fresh) needContent.map { it.workshopId.toLong() }.filter { manifestCache.containsKey(it) }.toSet() else emptySet()
                         val toFetch = needContent.map { it.workshopId.toLong() }.distinct().filter { it !in cached }
                         val manifests = try {
                             cached.associateWith { Result.success(manifestCache[it]!!) } +
