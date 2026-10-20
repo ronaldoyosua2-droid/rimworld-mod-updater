@@ -61,7 +61,14 @@ class ScanReveal(ctx: Context) : FrameLayout(ctx) {
 class CrtOverlay(ctx: Context) : View(ctx) {
 
     private val density = ctx.resources.displayMetrics.density
-    private val scanPaint = Paint().apply { color = 0x2E000000 }
+    // pola garis 1 piksel gelap tiap 3dp, digambar sekali lalu diulang (ringan)
+    private val scanPaint = Paint().apply {
+        val h = (3 * density).toInt().coerceAtLeast(3)
+        val bmp = android.graphics.Bitmap.createBitmap(1, h, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.setPixel(0, 0, 0x2E000000)
+        shader = android.graphics.BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+    }
+
     init {
         isClickable = false
         isFocusable = false
@@ -69,12 +76,7 @@ class CrtOverlay(ctx: Context) : View(ctx) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val step = 3 * density
-        var y = 0f
-        while (y < height) {
-            canvas.drawRect(0f, y, width.toFloat(), y + density * 0.8f, scanPaint)
-            y += step
-        }
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scanPaint)
     }
 }
 
@@ -114,12 +116,21 @@ object GlowPulse {
 
     private val items = mutableListOf<Entry>()
     private var flicker = 0f
+    private var lastTick = 0L
+    private val tmpRect = android.graphics.Rect()
     private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
         duration = 2200
         repeatCount = ValueAnimator.INFINITE
         repeatMode = ValueAnimator.REVERSE
         interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-        addUpdateListener { tick(it.animatedValue as Float) }
+        addUpdateListener {
+            // cukup ~12x per detik: gerakannya pelan, jadi tidak perlu 60 fps
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastTick >= 80) {
+                lastTick = now
+                tick(it.animatedValue as Float)
+            }
+        }
     }
 
     fun register(tv: android.widget.TextView, color: Int, radius: Float) {
@@ -130,7 +141,7 @@ object GlowPulse {
 
     private fun tick(v: Float) {
         // kedip kecil acak, cepat pulih
-        if (flicker <= 0f && Random.nextFloat() < 0.012f) flicker = 1f
+        if (flicker <= 0f && Random.nextFloat() < 0.05f) flicker = 1f
         val dip = if (flicker > 0f) { flicker -= 0.25f; 0.45f } else 0f
         val level = (0.35f + 0.65f * v - dip).coerceIn(0.1f, 1f)
         val it = items.iterator()
@@ -138,13 +149,13 @@ object GlowPulse {
             val e = it.next()
             val tv = e.ref.get()
             if (tv == null) { it.remove(); continue }
-            if (!tv.isAttachedToWindow) continue
+            // lewati yang tidak terlihat di layar
+            if (!tv.isAttachedToWindow || !tv.isShown || !tv.getGlobalVisibleRect(tmpRect)) continue
             val a = (60 + 170 * level).toInt()
             tv.setShadowLayer(
                 e.radius * (0.4f + 0.9f * level), 0f, 0f,
                 android.graphics.Color.argb(a, android.graphics.Color.red(e.color), android.graphics.Color.green(e.color), android.graphics.Color.blue(e.color)),
             )
-            tv.alpha = 0.78f + 0.22f * level
         }
     }
 }

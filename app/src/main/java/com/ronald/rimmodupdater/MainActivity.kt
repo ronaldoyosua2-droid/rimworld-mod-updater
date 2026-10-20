@@ -199,13 +199,13 @@ class MainActivity : AppCompatActivity() {
             textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(Hx.GREEN)
-            Hx.glow(this)
+            Hx.glow(this, pulse = true)
             background = boxBg(0x1039FF88, Hx.DIM)
             setOnClickListener { if (!busy) drawer.openDrawer(Gravity.START) }
         }
         titleView = term("STEAMOD_UPDATER", 19f, Hx.GREEN, bold = true).apply {
             letterSpacing = 0.06f
-            Hx.glow(this)
+            Hx.glow(this, pulse = true)
         }
         subtitleView = term("", 10.5f, Hx.DIM)
         val header = LinearLayout(this).apply {
@@ -220,7 +220,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
 
-        targetLabel = term(game.title.uppercase() + " [${game.appId}]", 12f, Hx.BRIGHT, bold = true).apply { Hx.glow(this) }
+        targetLabel = term(game.title.uppercase() + " [${game.appId}]", 12f, Hx.BRIGHT, bold = true).apply { Hx.glow(this, pulse = true) }
         val target = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -284,7 +284,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFF020604.toInt())
             setPadding(px(16), px(24), px(16), px(16))
             isClickable = true
-            addView(term("// SELECT TARGET", 12f, Hx.GREEN, bold = true).apply { letterSpacing = 0.15f; Hx.glow(this) })
+            addView(term("// SELECT TARGET", 12f, Hx.GREEN, bold = true).apply { letterSpacing = 0.15f; Hx.glow(this, pulse = true) })
             addView(term("> loading game profiles...\n> ${Game.entries.size} profiles found OK", 10f, Hx.DIM).apply {
                 setPadding(0, px(4), 0, px(16))
             })
@@ -521,7 +521,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
 
+    private var lastRender = 0L
+    private var renderPending = false
+
+    /** Gambar ulang daftar mod, paling sering ~3x per detik (supaya tidak lag saat cek banyak mod). */
     private fun renderList() {
+        if (renderPending) return
+        val wait = 350L - (android.os.SystemClock.uptimeMillis() - lastRender)
+        if (wait <= 0) {
+            doRenderList()
+        } else {
+            renderPending = true
+            ui.postDelayed({ renderPending = false; doRenderList() }, wait)
+        }
+    }
+
+    private fun doRenderList() {
+        lastRender = android.os.SystemClock.uptimeMillis()
         listContainer.removeAllViews()
         val list = visible
         val anim = animateList
