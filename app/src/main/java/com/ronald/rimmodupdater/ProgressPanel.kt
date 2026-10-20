@@ -55,6 +55,40 @@ class ProgressPanel(private val ctx: Context) {
     @Volatile private var items: List<Pair<String, ItemState>> = emptyList()
     private val lines = ArrayDeque<CharSequence>()
     private val maxLines = 8
+
+    // efek mengetik: baris baru masuk antrean lalu "diketik" huruf per huruf
+    private val queue = ArrayDeque<CharSequence>()
+    private var typing: CharSequence? = null
+    private var typed = 0
+    private var typerOn = false
+    private var cursorOn = true
+    private var lastBlink = 0L
+    private val typer = object : Runnable {
+        override fun run() {
+            var busy: Boolean
+            synchronized(lines) {
+                if (typing == null && queue.isNotEmpty()) { typing = queue.removeFirst(); typed = 0 }
+                // kalau antrean menumpuk (proses cepat), baris lama langsung tampil penuh
+                while (queue.size > 4) {
+                    typing?.let { lines.addLast(it) }
+                    typing = queue.removeFirst(); typed = 0
+                }
+                while (lines.size > maxLines - 1) lines.removeFirst()
+                val t = typing
+                if (t != null) {
+                    typed += 2 + queue.size * 3
+                    if (typed >= t.length) {
+                        lines.addLast(t)
+                        while (lines.size > maxLines) lines.removeFirst()
+                        typing = null
+                    }
+                }
+                busy = typing != null || queue.isNotEmpty()
+            }
+            renderTerm()
+            if (busy) main.postDelayed(this, 22) else typerOn = false
+        }
+    }
     @Volatile private var dirty = false
     @Volatile private var scheduled = false
 
@@ -265,7 +299,7 @@ class ProgressPanel(private val ctx: Context) {
     // ------------------------------------------------------------------ API
 
     fun start(caption: String, title: String, badge: String) {
-        synchronized(lines) { lines.clear() }
+        synchronized(lines) { lines.clear(); queue.clear(); typing = null }
         this.caption = caption
         this.title = title
         this.badge = badge
@@ -318,11 +352,10 @@ class ProgressPanel(private val ctx: Context) {
         add(tag.padEnd(8) + " ", if (error) tErr else tTag, bold = true)
         add(msg, if (error) tErr else tGreen)
         if (ok != null) add(" $ok", tOk)
-        synchronized(lines) {
-            lines.addLast(sb)
-            while (lines.size > maxLines) lines.removeFirst()
+        synchronized(lines) { queue.addLast(sb) }
+        main.post {
+            if (!typerOn) { typerOn = true; main.post(typer) }
         }
-        invalidate()
     }
 
     // ------------------------------------------------------------------ render
@@ -338,6 +371,30 @@ class ProgressPanel(private val ctx: Context) {
                 render()
             }
         }, 80)
+    }
+
+    /** Gambar ulang terminal: baris selesai + baris yang sedang diketik + kursor. */
+    private fun renderTerm() {
+        val term = SpannableStringBuilder()
+        synchronized(lines) {
+            lines.forEachIndexed { i, l ->
+                if (i > 0) term.append('\n')
+                term.append(l)
+            }
+            val t = typing
+            if (t != null) {
+                if (lines.isNotEmpty()) term.append('\n')
+                term.append(t.subSequence(0, typed.coerceAtMost(t.length)))
+            }
+        }
+        val st = term.length
+        term.append("█")
+        // kursor tetap menyala saat mengetik, berkedip saat diam
+        val now = android.os.SystemClock.uptimeMillis()
+        if (typing != null) cursorOn = true
+        else if (now - lastBlink > 450) { cursorOn = !cursorOn; lastBlink = now }
+        term.setSpan(ForegroundColorSpan(if (cursorOn) tGreen else 0x00000000), st, term.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        termText.text = term
     }
 
     private fun render() {
@@ -380,17 +437,7 @@ class ProgressPanel(private val ctx: Context) {
         detailView.text = detail
         detailView.visibility = if (detail.isBlank()) View.GONE else View.VISIBLE
 
-        val term = SpannableStringBuilder()
-        synchronized(lines) {
-            lines.forEachIndexed { i, l ->
-                if (i > 0) term.append('\n')
-                term.append(l)
-            }
-        }
-        val st = term.length
-        term.append("█")
-        term.setSpan(ForegroundColorSpan(tGreen), st, term.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        termText.text = term
+        renderTerm()
 
         val list = items
         if (list.isEmpty()) {
