@@ -787,22 +787,27 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ add mods
 
     private fun upsert(entry: ModEntry) {
-        val existing = mods.indexOfFirst {
-            it.game == entry.game && (
-                (it.sourceUri != null && it.sourceUri == entry.sourceUri && it.subPath == entry.subPath) ||
-                    // RimWorld: satu ID = satu mod. Zomboid: satu item Workshop bisa berisi beberapa folder mod.
-                    (entry.game == Game.RIMWORLD.key && entry.workshopId.isNotBlank() && it.workshopId == entry.workshopId)
-                )
-        }
+        val zomboid = entry.game == Game.ZOMBOID.key
+        fun same(it: ModEntry) = it.game == entry.game && (
+            (it.sourceUri != null && it.sourceUri == entry.sourceUri && it.subPath == entry.subPath) ||
+                // Zomboid: folder mod dengan nama sama = mod yang sama, walau dipilih lewat jalur folder lain
+                (zomboid && it.sourceType == "folder" && entry.subPath.isNotBlank() && it.subPath.equals(entry.subPath, ignoreCase = true)) ||
+                // RimWorld: satu ID = satu mod. Zomboid: satu item Workshop bisa berisi beberapa folder mod.
+                (!zomboid && entry.workshopId.isNotBlank() && it.workshopId == entry.workshopId)
+            )
+        val existing = mods.indexOfFirst { same(it) }
         if (existing >= 0) {
             // pertahankan info versi yang sudah diketahui untuk folder yang sama
             val old = mods[existing]
-            if (old.sourceUri == entry.sourceUri && old.subPath == entry.subPath && entry.workshopId.isBlank()) {
+            // buang duplikat lain (sisa tambah folder sebelumnya)
+            for (i in mods.indices.reversed()) if (i != existing && same(mods[i])) mods.removeAt(i)
+            val oldSameFolder = (old.sourceUri == entry.sourceUri || zomboid) && old.subPath.equals(entry.subPath, ignoreCase = true)
+            if (oldSameFolder && entry.workshopId.isBlank()) {
                 entry.workshopId = old.workshopId
                 entry.contentPrefix = old.contentPrefix
                 entry.installedVersion = old.installedVersion
             }
-            mods[existing] = entry
+            mods[mods.indexOfFirst { it === old }] = entry
         } else {
             mods.add(entry)
         }
@@ -1196,6 +1201,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         // 2) Bandingkan dengan file lokal.
                         var diffMods = 0
+                        var removedDup = 0
                         panel.badge("CEK ISI")
                         needContent.forEachIndexed { i, m ->
                             val prefix = ""
@@ -1228,6 +1234,21 @@ class MainActivity : AppCompatActivity() {
                                     m.status = "Ada update! (${r.different.size} dari ${r.total} file berbeda)"
                                     AppLog.i("${m.displayName}: file berbeda ${r.different.take(15)}")
                                 }
+                            } catch (e: FolderMissing) {
+                                // folder hilang: kalau ada entri lain untuk folder yang sama (duplikat), buang yang ini
+                                val dup = mods.any { o -> o !== m && o.game == m.game && o.sourceType == "folder" &&
+                                    o.subPath.equals(m.subPath, ignoreCase = true) && (m.subPath.isNotBlank() || o.name == m.name) }
+                                if (dup) {
+                                    mods.remove(m)
+                                    removedDup++
+                                    AppLog.i("Duplikat dibuang (folder lama tidak ada): ${m.displayName} ${m.sourceUri}")
+                                    panel.log("CLEAN", "${m.displayName}: duplikat lama dibuang", "OK")
+                                } else {
+                                    AppLog.w("Cek isi ${m.workshopId} (${m.displayName}): folder tidak ditemukan ${m.sourceUri} / ${m.subPath}")
+                                    panel.log("FAIL", "${m.displayName}: folder tidak ditemukan", error = true)
+                                    m.updateAvailable = false
+                                    m.status = "Gagal: folder mod tidak ditemukan (sudah dihapus/dipindah?). Tekan DEL, atau tambah ulang foldernya."
+                                }
                             } catch (e: Exception) {
                                 AppLog.e("Cek isi ${m.workshopId} (${m.displayName}) gagal", e)
                                 panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
@@ -1238,10 +1259,12 @@ class MainActivity : AppCompatActivity() {
                             renderList()
                         }
                         mfDir.deleteRecursively()
+                        if (removedDup > 0) toast("$removedDup duplikat lama dibuang dari daftar")
                     }
                 }
                 store.save(mods)
-                val updates = targets.count { it.updateAvailable }
+                renderList()
+                val updates = targets.count { it.updateAvailable && it in mods }
                 panel.caption("CEK UPDATE · SELESAI")
                 panel.title(if (updates == 0) "Semua terbaru" else "$updates mod perlu update")
                 panel.badge("SELESAI")
@@ -1269,6 +1292,8 @@ class MainActivity : AppCompatActivity() {
         return ModFiles.scope(remote, m.contentPrefix)
     }
 
+    private class FolderMissing : Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+
     private suspend fun compareContent(
         m: ModEntry,
         remoteAll: List<ModFiles.RemoteFile>,
@@ -1278,7 +1303,7 @@ class MainActivity : AppCompatActivity() {
         when (m.sourceType) {
             "folder" -> {
                 val dir = ModFiles.resolveFolder(this@MainActivity, m)
-                    ?: throw Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+                    ?: throw FolderMissing()
                 ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
             }
             "zip" -> ModFiles.compareZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, remote, onProgress)
