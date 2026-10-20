@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
         refreshSteamStatus()
         renderList()
         AppLog.takeLastCrash()?.let { crash ->
-            MaterialAlertDialogBuilder(this)
+            CmdDialog(this)
                 .setTitle(tr("Aplikasi sempat crash", "The app crashed"))
                 .setMessage(tr("Sebelumnya aplikasi tertutup karena error. Kirim log ke Claude supaya bisa diperbaiki?\n\n", "The app closed because of an error last time. Send the log to Claude so it can be fixed?\n\n") + crash.take(600))
                 .setPositiveButton(tr("Kirim log", "Send log")) { _, _ -> shareLog() }
@@ -477,7 +477,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showSettings() {
         val langs = arrayOf("Bahasa Indonesia", "English")
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle(tr("Setting · Bahasa", "Settings · Language"))
             .setSingleChoiceItems(langs, if (Lang.en) 1 else 0) { d, which ->
                 d.dismiss()
@@ -506,7 +506,7 @@ class MainActivity : AppCompatActivity() {
         }
         val scroll = ScrollView(this).apply { addView(tv) }
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle("Log • ${AppLog.buildLabel}")
             .setView(scroll)
             .setPositiveButton(tr("Kirim log", "Send log")) { _, _ -> shareLog() }
@@ -662,7 +662,7 @@ class MainActivity : AppCompatActivity() {
             isEnabled = !busy && m.workshopId.isNotBlank() && (m.updateAvailable || m.sourceType == "none" || m.installedVersion.isEmpty())
         }
         val bForce = button("FORCE", small = true) {
-            MaterialAlertDialogBuilder(this).setTitle(tr("Download ulang?", "Download again?"))
+            CmdDialog(this).setTitle(tr("Download ulang?", "Download again?"))
                 .setMessage(tr("Download ulang ${m.displayName} dari Workshop walaupun sudah terbaru?", "Download ${m.displayName} from the Workshop again even though it's up to date?"))
                 .setPositiveButton("Ya") { _, _ -> updateMods(listOf(m)) }
                 .setNegativeButton(tr("Batal", "Cancel"), null).show()
@@ -670,7 +670,7 @@ class MainActivity : AppCompatActivity() {
         val needSearch = m.game == Game.ZOMBOID.key && m.workshopId.isBlank() && m.sourceType == "folder"
         val bId = button(if (needSearch) "FIND ID" else "EDIT ID", small = true) {
             if (needSearch) {
-                MaterialAlertDialogBuilder(this).setTitle("ID Workshop: ${m.displayName}")
+                CmdDialog(this).setTitle("ID Workshop: ${m.displayName}")
                     .setPositiveButton(tr("Cari otomatis", "Auto search")) { _, _ -> discoverZomboidIds(listOf(m)) }
                     .setNegativeButton(tr("Isi manual", "Enter manually")) { _, _ -> askEditId(m) }
                     .setNeutralButton(tr("Batal", "Cancel"), null).show()
@@ -742,7 +742,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += tr("Cari ID otomatis lagi", "Auto-find ID again") to { discoverZomboidIds(listOf(m)) }
         items += tr("Isi / ubah ID Workshop", "Set / change Workshop ID") to { askEditId(m) }
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle(m.displayName)
             .setItems(items.map { "> " + it.first }.toTypedArray()) { _, i -> items[i].second() }
             .show()
@@ -752,7 +752,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun askDelete(m: ModEntry) {
         val hasFiles = m.sourceType == "folder" || m.sourceType == "zip"
-        val b = MaterialAlertDialogBuilder(this)
+        val b = CmdDialog(this)
             .setTitle("DEL · ${m.displayName}")
             .setMessage(
                 if (hasFiles) tr("Hapus dari daftar saja, atau hapus juga file mod-nya dari HP?\n\n" +
@@ -764,7 +764,7 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(tr("Dari daftar saja", "List only")) { _, _ -> removeFromList(m) }
         if (hasFiles) {
             b.setPositiveButton(tr("Hapus file juga", "Delete files too")) { _, _ ->
-                MaterialAlertDialogBuilder(this)
+                CmdDialog(this)
                     .setTitle(tr("Yakin hapus permanen?", "Delete permanently?"))
                     .setMessage(tr("Folder/file mod \"${m.displayName}\" akan dihapus dari HP dan tidak bisa dikembalikan.", "The mod folder/file \"${m.displayName}\" will be deleted from your phone and can't be restored."))
                     .setPositiveButton(tr("Ya, hapus", "Yes, delete")) { _, _ -> deleteModFiles(m) }
@@ -1097,7 +1097,7 @@ class MainActivity : AppCompatActivity() {
             hint = "https://steamcommunity.com/sharedfiles/filedetails/?id=…"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle(tr("Tambah dari link Workshop", "Add from Workshop link"))
             .setMessage(tr("Tempel link atau ID mod. Bisa beberapa sekaligus (pisahkan dengan baris baru). Hasilnya disimpan di \"Folder hasil\".", "Paste a mod link or ID. You can add several at once (one per line). Downloads are saved to the output folder."))
             .setView(padded(input))
@@ -1125,7 +1125,7 @@ class MainActivity : AppCompatActivity() {
             setText(m.workshopId)
             hint = tr("Link atau ID Workshop", "Workshop link or ID")
         }
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle("ID Workshop: ${m.displayName}")
             .setMessage(tr("Tempel link atau ID Workshop. Belum tahu? Tekan \"Cari\" untuk mencari nama mod ini di Steam Workshop, lalu salin link-nya.", "Paste a Workshop link or ID. Don't know it? Tap \"Search\" to look up this mod on Steam Workshop, then copy its link."))
             .setNeutralButton(tr("Cari", "Search")) { _, _ -> openUrl(workshopSearchUrl(m.displayName)) }
@@ -1372,7 +1372,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val total = list.sumOf { it.remoteSize }
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle(tr("Update ${list.size} mod?", "Update ${list.size} mods?"))
             .setMessage(
                 (if (total > 0) tr("Total download sekitar ${fmtSize(total)}.\n\n", "Total download about ${fmtSize(total)}.\n\n") else "") +
@@ -1386,7 +1386,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateMods(list: List<ModEntry>) {
         if (busy) return
         if (list.any { it.sourceType == "none" } && outputRoot() == null) {
-            MaterialAlertDialogBuilder(this)
+            CmdDialog(this)
                 .setTitle(tr("Pilih folder hasil", "Choose output folder"))
                 .setMessage(
                     if (game == Game.ZOMBOID) tr("Mod dari link akan disimpan di folder yang kamu pilih. Pilih folder Zomboid/mods milik Zomdroid supaya langsung terpasang.", "Mods from links are saved to the folder you choose. Pick Zomdroid's Zomboid/mods folder so they're installed right away.")
@@ -1711,7 +1711,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
         var resumed = false
-        MaterialAlertDialogBuilder(this)
+        CmdDialog(this)
             .setTitle(tr("Login Steam", "Steam login"))
             .setView(box)
             .setCancelable(false)
@@ -1729,12 +1729,12 @@ class MainActivity : AppCompatActivity() {
     /** Dialog verifikasi Steam (Steam Guard) yang dipakai selama login. */
     private inner class UiLogin : SteamManager.LoginUi {
 
-        private suspend fun <T> dialog(build: (MaterialAlertDialogBuilder, (T) -> Unit) -> Unit): T =
+        private suspend fun <T> dialog(build: (CmdDialog, (T) -> Unit) -> Unit): T =
             withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine { cont ->
                     var done = false
                     val finish: (T) -> Unit = { v -> if (!done) { done = true; cont.resume(v) } }
-                    val b = MaterialAlertDialogBuilder(this@MainActivity).setCancelable(false)
+                    val b = CmdDialog(this@MainActivity).setCancelable(false)
                     build(b, finish)
                     b.show()
                 }
