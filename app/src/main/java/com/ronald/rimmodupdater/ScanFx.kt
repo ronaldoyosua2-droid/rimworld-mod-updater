@@ -50,8 +50,27 @@ class ScanReveal(ctx: Context) : FrameLayout(ctx) {
     /** Muncul perlahan (memudar masuk), tanpa garis turun. */
     fun reveal(delayMs: Long = 0, durationMs: Long = 420) {
         animator?.cancel()
+        progress = 1f
         alpha = 0f
         animate().alpha(1f).setStartDelay(delayMs).setDuration(durationMs).start()
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        if (progress >= 1f) {
+            super.dispatchDraw(canvas)
+            return
+        }
+        val y = height * progress
+        canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), y)
+        super.dispatchDraw(canvas)
+        canvas.restore()
+        // cahaya di belakang garis
+        val glowH = 14 * density
+        glowPaint.shader = LinearGradient(0f, y - glowH, 0f, y, 0x0039FF88, 0x5539FF88, Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, y - glowH, width.toFloat(), y, glowPaint)
+        // garis tipis
+        canvas.drawRect(0f, y - 1f * density, width.toFloat(), y + 0.5f * density, linePaint)
     }
 }
 
