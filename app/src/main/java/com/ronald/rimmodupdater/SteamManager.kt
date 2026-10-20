@@ -35,7 +35,7 @@ import kotlin.concurrent.thread
 /** Login Steam + download mod Workshop memakai JavaSteam. */
 object SteamManager {
 
-    class LoginRequired : Exception("Perlu login Steam")
+    class LoginRequired : Exception(tr("Perlu login Steam", "Steam login required"))
 
     /** App ID game yang sedang aktif (RimWorld 294100 / Project Zomboid 108600). */
     @Volatile var appId: Int = Game.RIMWORLD.appId
@@ -121,7 +121,7 @@ object SteamManager {
         m.subscribe(DisconnectedCallback::class.java) {
             loggedIn = false
             AppLog.w("Terputus dari Steam")
-            val err = Exception("Koneksi ke Steam terputus")
+            val err = Exception(tr("Koneksi ke Steam terputus", "Connection to Steam lost"))
             connectedSignal?.completeExceptionally(err)
             logonSignal?.completeExceptionally(err)
             licenseSignal?.completeExceptionally(err)
@@ -204,7 +204,7 @@ object SteamManager {
         suspend fun askCode(isEmail: Boolean, hint: String?, previousWrong: Boolean): String?
     }
 
-    class LoginCancelled : Exception("Login dibatalkan")
+    class LoginCancelled : Exception(tr("Login dibatalkan", "Login cancelled"))
 
     /** Jalankan [block]; kalau gagal karena koneksi putus, sambung ulang lalu coba lagi. */
     private suspend fun <T> withReconnect(what: String, block: suspend () -> T): T {
@@ -221,7 +221,7 @@ object SteamManager {
                 delay(1500)
             }
         }
-        throw last ?: Exception("$what gagal")
+        throw last ?: Exception(tr("$what gagal", "$what failed"))
     }
 
     /**
@@ -280,7 +280,7 @@ object SteamManager {
                         }
                     }
                 } else {
-                    throw Exception("Jenis verifikasi Steam belum didukung: $types")
+                    throw Exception(tr("Jenis verifikasi Steam belum didukung: $types", "Unsupported Steam verification type: $types"))
                 }
             }
 
@@ -290,14 +290,14 @@ object SteamManager {
             var poll: AuthPollResult? = null
             while (poll == null) {
                 if (System.currentTimeMillis() > deadline) {
-                    throw Exception("Persetujuan login tidak diterima dalam 3 menit. Coba lagi.")
+                    throw Exception(tr("Persetujuan login tidak diterima dalam 3 menit. Coba lagi.", "Login approval not received within 3 minutes. Try again."))
                 }
                 try {
                     if (client?.isConnected != true) connect()
                     poll = session.pollAuthSessionStatus().await()
                 } catch (e: AuthenticationException) {
                     if (e.result == EResult.Expired || e.result == EResult.FileNotFound) {
-                        throw Exception("Permintaan login sudah kedaluwarsa. Coba login lagi.")
+                        throw Exception(tr("Permintaan login sudah kedaluwarsa. Coba login lagi.", "The login request expired. Try logging in again."))
                     }
                     AppLog.w("Cek status login: ${e.message}")
                 } catch (e: Exception) {
@@ -309,7 +309,7 @@ object SteamManager {
             AppLog.i("Persetujuan login diterima untuk ${auth.accountName}")
 
             val result = withReconnect("Logon") { logOn(auth.accountName, auth.refreshToken) }
-            if (result != EResult.OK) throw Exception("Login Steam gagal: $result")
+            if (result != EResult.OK) throw Exception(tr("Login Steam gagal: $result", "Steam login failed: $result"))
             prefs(ctx).edit()
                 .putString("account", auth.accountName)
                 .putString("token", auth.refreshToken)
@@ -344,7 +344,7 @@ object SteamManager {
         val count = ModFiles.downloadedFiles(dir).size
         AppLog.i("Download $workshopId selesai: $count file")
         if (count == 0) {
-            throw Exception("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.")
+            throw Exception(tr("Download selesai tapi tidak ada file. Mungkin akunmu tidak punya RimWorld, atau mod-nya dihapus.", "Download finished but no files arrived. Your account may not own the game, or the mod was removed."))
         }
         return partial
     }
@@ -374,7 +374,7 @@ object SteamManager {
     suspend fun fetchManifest(ctx: Context, workshopId: Long, dir: File, onStatus: (String) -> Unit): List<ModFiles.RemoteFile> {
         runDepot(ctx, workshopId, dir, manifestOnly = true, onStatus = onStatus)
         val txt = dir.listFiles()?.firstOrNull { it.name.startsWith("manifest_") && it.name.endsWith(".txt") }
-            ?: throw Exception("Daftar file mod tidak didapat dari Steam")
+            ?: throw Exception(tr("Daftar file mod tidak didapat dari Steam", "Mod file list not received from Steam"))
         return ModFiles.parseManifest(txt)
     }
 
@@ -421,7 +421,7 @@ object SteamManager {
         val started = System.currentTimeMillis()
         val doneCount = java.util.concurrent.atomic.AtomicInteger(0)
         val report: () -> Unit = {
-            onStatus("Ambil daftar file dari Steam: ${doneCount.get()}/${all.size} mod")
+            onStatus(tr("Ambil daftar file dari Steam: ${doneCount.get()}/${all.size} mod", "Getting file lists from Steam: ${doneCount.get()}/${all.size} mods"))
             onFraction(doneCount.get().toFloat() / all.size.coerceAtLeast(1))
         }
         report()
@@ -453,7 +453,7 @@ object SteamManager {
 
         fun parse(id: Long): Result<List<ModFiles.RemoteFile>> = runCatching {
             val txt = dirs[id]!!.listFiles()?.firstOrNull { it.name.startsWith("manifest_") && it.name.endsWith(".txt") }
-                ?: throw Exception("Daftar file tidak didapat dari Steam")
+                ?: throw Exception(tr("Daftar file tidak didapat dari Steam", "File list not received from Steam"))
             ModFiles.parseManifest(txt)
         }
 
@@ -522,7 +522,7 @@ object SteamManager {
             } catch (_: Exception) {
             }
         }
-        order.associateWith { id -> results[id] ?: parse(id).takeIf { it.isSuccess } ?: Result.failure(Exception("Steam tidak merespons")) }
+        order.associateWith { id -> results[id] ?: parse(id).takeIf { it.isSuccess } ?: Result.failure(Exception(tr("Steam tidak merespons", "Steam is not responding"))) }
     }
 
     private suspend fun runDepot(
@@ -570,7 +570,7 @@ object SteamManager {
 
             override fun onFileCompleted(depotId: Int, fileName: String, depotPercentComplete: Float) {
                 activity.set(System.currentTimeMillis())
-                onStatus("Download: $fileName")
+                onStatus(tr("Download: $fileName", "Download: $fileName"))
                 onFraction(depotPercentComplete)
                 onFile(fileName)
             }
@@ -604,7 +604,7 @@ object SteamManager {
             while (!done.isCompleted) {
                 delay(300)
                 if (System.currentTimeMillis() - activity.get() > limit) {
-                    throw Exception("Steam tidak merespons (macet ${limit / 1000} detik)")
+                    throw Exception(tr("Steam tidak merespons (macet ${limit / 1000} detik)", "Steam is not responding (stalled ${limit / 1000} s)"))
                 }
             }
             done.await()

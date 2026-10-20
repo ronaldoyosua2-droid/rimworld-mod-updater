@@ -63,7 +63,7 @@ object ModFiles {
             ?: dir.name?.takeIf { it.matches(Regex("""\d{5,}""")) }
         val times = (aboutFiles.toList() + dir.listFiles().toList()).map { it.lastModified() }
         return ScannedMod(
-            name = parseName(aboutXml) ?: dir.name ?: "Mod tanpa nama",
+            name = parseName(aboutXml) ?: dir.name ?: tr("Mod tanpa nama", "Unnamed mod"),
             workshopId = pubId,
             localTime = (times.maxOrNull() ?: 0L) / 1000,
             subPath = subPath,
@@ -147,7 +147,7 @@ object ModFiles {
         val prefix = bestPrefix ?: return null
         val folderName = prefix.trimEnd('/').substringAfterLast('/')
         return ScannedMod(
-            name = parseName(aboutXml) ?: folderName.ifBlank { fileName ?: "Mod tanpa nama" },
+            name = parseName(aboutXml) ?: folderName.ifBlank { fileName ?: tr("Mod tanpa nama", "Unnamed mod") },
             workshopId = pubIds[prefix] ?: folderName.takeIf { it.matches(Regex("""\d{5,}""")) }
                 ?: fileName?.let { Regex("""\d{7,}""").find(it)?.value },
             localTime = maxTime / 1000,
@@ -180,7 +180,7 @@ object ModFiles {
         onProgress: (String) -> Unit,
         onFraction: (Float) -> Unit = {},
     ) {
-        onProgress("Menghapus file lama…")
+        onProgress(tr("Menghapus file lama…", "Removing old files…"))
         target.listFiles().forEach { it.delete() }
         copyInto(ctx, target, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
     }
@@ -195,7 +195,7 @@ object ModFiles {
         onFraction: (Float) -> Unit = {},
     ): DocumentFile {
         outRoot.listFiles().firstOrNull { it.name == folderName }?.delete()
-        val dir = outRoot.createDirectory(folderName) ?: throw Exception("Tidak bisa membuat folder $folderName")
+        val dir = outRoot.createDirectory(folderName) ?: throw Exception(tr("Tidak bisa membuat folder $folderName", "Can't create folder $folderName"))
         copyInto(ctx, dir, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
         return dir
     }
@@ -212,15 +212,15 @@ object ModFiles {
         srcDir.listFiles()?.sortedBy { it.name }?.forEach { f ->
             if (f.isDirectory) {
                 if (f.name == ".DepotDownloader") return@forEach
-                val sub = target.createDirectory(f.name) ?: throw Exception("Gagal membuat folder ${f.name}")
+                val sub = target.createDirectory(f.name) ?: throw Exception(tr("Gagal membuat folder ${f.name}", "Couldn't create folder ${f.name}"))
                 copyInto(ctx, sub, f, root, onProgress, counter)
             } else {
-                onProgress("Menyalin ${f.relativeTo(root).path}")
+                onProgress(tr("Menyalin ${f.relativeTo(root).path}", "Copying ${f.relativeTo(root).path}"))
                 val doc = target.createFile("application/octet-stream", f.name)
-                    ?: throw Exception("Gagal membuat file ${f.name}")
+                    ?: throw Exception(tr("Gagal membuat file ${f.name}", "Couldn't create file ${f.name}"))
                 ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
                     f.inputStream().use { it.copyTo(out) }
-                } ?: throw Exception("Gagal menulis ${f.name}")
+                } ?: throw Exception(tr("Gagal menulis ${f.name}", "Couldn't write ${f.name}"))
                 counter.tick()
             }
         }
@@ -237,11 +237,11 @@ object ModFiles {
     ) {
         val files = downloadedFiles(src)
         val out = ctx.contentResolver.openOutputStream(zipUri, "wt")
-            ?: throw Exception("Tidak bisa menulis ke file zip")
+            ?: throw Exception(tr("Tidak bisa menulis ke file zip", "Can't write to the zip file"))
         ZipOutputStream(out.buffered()).use { zos ->
             files.forEachIndexed { idx, f ->
                 val rel = f.relativeTo(src).path.replace('\\', '/')
-                onProgress("Mengemas $rel")
+                onProgress(tr("Mengemas $rel", "Packing $rel"))
                 zos.putNextEntry(ZipEntry(prefix + rel).apply { time = f.lastModified() })
                 f.inputStream().use { it.copyTo(zos) }
                 zos.closeEntry()
@@ -327,8 +327,8 @@ object ModFiles {
         remote.forEach { rf ->
             val l = local[rf.path] ?: lower[rf.path.lowercase()]
             when {
-                l == null -> diff += "${rf.path} (tidak ada)"
-                l.second != rf.size -> diff += "${rf.path} (ukuran beda)"
+                l == null -> diff += tr("${rf.path} (tidak ada)", "${rf.path} (missing)")
+                l.second != rf.size -> diff += tr("${rf.path} (ukuran beda)", "${rf.path} (size differs)")
                 needsHash(rf) -> toHash += rf to l.first
             }
         }
@@ -342,8 +342,8 @@ object ModFiles {
                 java.util.concurrent.Callable {
                     val h = ctx.contentResolver.openInputStream(uri)?.use { sha1(it) }
                     val n = done.incrementAndGet()
-                    if (n % 20 == 0) onProgress("Memeriksa isi file $n/${toHash.size}")
-                    if (h != rf.sha1) "${rf.path} (isi beda)" else null
+                    if (n % 20 == 0) onProgress(tr("Memeriksa isi file $n/${toHash.size}", "Checking file contents $n/${toHash.size}"))
+                    if (h != rf.sha1) tr("${rf.path} (isi beda)", "${rf.path} (content differs)") else null
                 }
             })
             results.mapNotNullTo(diff) { it.get() }
@@ -368,9 +368,9 @@ object ModFiles {
                     val key = name.removePrefix(prefix).lowercase()
                     val rf = byPath[key] ?: continue
                     seen += key
-                    if (++n % 25 == 0) onProgress("Memeriksa file $n/${remote.size}")
+                    if (++n % 25 == 0) onProgress(tr("Memeriksa file $n/${remote.size}", "Checking files $n/${remote.size}"))
                     if (!needsHash(rf) && e.size >= 0) {
-                        if (e.size != rf.size) diff += "${rf.path} (ukuran beda)"
+                        if (e.size != rf.size) diff += tr("${rf.path} (ukuran beda)", "${rf.path} (size differs)")
                         continue
                     }
                     val counting = object : java.io.FilterInputStream(zis) {
@@ -380,12 +380,12 @@ object ModFiles {
                         override fun close() {}
                     }
                     val h = sha1(counting)
-                    if (counting.count != rf.size) diff += "${rf.path} (ukuran beda)"
-                    else if (rf.size > 0 && h != rf.sha1) diff += "${rf.path} (isi beda)"
+                    if (counting.count != rf.size) diff += tr("${rf.path} (ukuran beda)", "${rf.path} (size differs)")
+                    else if (rf.size > 0 && h != rf.sha1) diff += tr("${rf.path} (isi beda)", "${rf.path} (content differs)")
                 }
             }
-        } ?: throw Exception("Tidak bisa membuka zip")
-        remote.filter { it.path.lowercase() !in seen }.forEach { diff += "${it.path} (tidak ada)" }
+        } ?: throw Exception(tr("Tidak bisa membuka zip", "Can't open the zip"))
+        remote.filter { it.path.lowercase() !in seen }.forEach { diff += tr("${it.path} (tidak ada)", "${it.path} (missing)") }
         return CompareResult(remote.size, diff)
     }
 
@@ -434,7 +434,7 @@ object ModFiles {
                         }
                         if (h != rf.sha1) changed += rf
                         val n = done.incrementAndGet()
-                        if (n % 50 == 0) onProgress("Memeriksa file lokal $n/${toHash.size}")
+                        if (n % 50 == 0) onProgress(tr("Memeriksa file lokal $n/${toHash.size}", "Checking local files $n/${toHash.size}"))
                     }
                 }).forEach { it.get() }
             } finally {
@@ -461,7 +461,7 @@ object ModFiles {
             val name = rel.substringAfterLast('/')
             val d = parent.listFiles().firstOrNull { it.isDirectory && it.name.equals(name, true) }
                 ?: parent.createDirectory(name)
-                ?: throw Exception("Gagal membuat folder $rel")
+                ?: throw Exception(tr("Gagal membuat folder $rel", "Couldn't create folder $rel"))
             dirs[rel] = d
             return d
         }
@@ -469,15 +469,15 @@ object ModFiles {
         var done = 0
         plan.changed.forEach { rf ->
             val f = File(src, rf.path)
-            if (!f.isFile) throw Exception("File hasil download tidak ada: ${rf.path}")
+            if (!f.isFile) throw Exception(tr("File hasil download tidak ada: ${rf.path}", "Downloaded file missing: ${rf.path}"))
             val parent = dirFor(rf.path.substringBeforeLast('/', ""))
             val name = rf.path.substringAfterLast('/')
             val doc = parent.findFile(name) ?: parent.createFile("application/octet-stream", name)
-                ?: throw Exception("Gagal membuat file ${rf.path}")
+                ?: throw Exception(tr("Gagal membuat file ${rf.path}", "Couldn't create file ${rf.path}"))
             ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
                 f.inputStream().use { it.copyTo(out) }
-            } ?: throw Exception("Gagal menulis ${rf.path}")
-            onProgress("Menyalin ${rf.path}")
+            } ?: throw Exception(tr("Gagal menulis ${rf.path}", "Couldn't write ${rf.path}"))
+            onProgress(tr("Menyalin ${rf.path}", "Copying ${rf.path}"))
             done++
             onFraction(done.toFloat() / total.coerceAtLeast(1))
         }
@@ -486,7 +486,7 @@ object ModFiles {
                 DocumentsContract.deleteDocument(ctx.contentResolver, uri)
             } catch (_: Exception) {
             }
-            onProgress("Menghapus $rel")
+            onProgress(tr("Menghapus $rel", "Removing $rel"))
             done++
             onFraction(done.toFloat() / total.coerceAtLeast(1))
         }
@@ -552,7 +552,7 @@ object ModFiles {
         val dirs = children(ctx, treeUri, rootId).filter { it.isDir }
         val out = mutableListOf<ScannedMod>()
         dirs.forEachIndexed { i, d ->
-            if (i % 10 == 0) onProgress("Membaca folder mod ${i + 1}/${dirs.size}")
+            if (i % 10 == 0) onProgress(tr("Membaca folder mod ${i + 1}/${dirs.size}", "Reading mod folders ${i + 1}/${dirs.size}"))
             val info = findModInfo(ctx, treeUri, d.id) ?: return@forEachIndexed
             val (name, id) = readModInfo(ctx, treeUri, info)
             out += ScannedMod(name ?: d.name, null, 0, subPath = d.name, modId = id ?: "")

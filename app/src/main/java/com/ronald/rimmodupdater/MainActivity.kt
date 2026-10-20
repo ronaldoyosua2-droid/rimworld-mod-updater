@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var listContainer: LinearLayout
     private val actionButtons = mutableListOf<View>()
 
-    private val dateFmt = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.forLanguageTag("id"))
+    private val dateFmt get() = SimpleDateFormat("dd MMM yyyy, HH:mm", Lang.locale)
     private val dp get() = resources.displayMetrics.density
 
     private val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             persist(uri)
             store.setOutputFor(game.key, uri.toString())
-            toast("Folder hasil disimpan")
+            toast(tr("Folder hasil disimpan", "Output folder saved"))
             afterOutputPicked?.invoke()
         }
         afterOutputPicked = null
@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLog.init(this)
+        Lang.init(this)
         SteamManager.installCrypto()
         store = ModStore(this)
         mods.addAll(store.load())
@@ -101,10 +102,10 @@ class MainActivity : AppCompatActivity() {
         renderList()
         AppLog.takeLastCrash()?.let { crash ->
             MaterialAlertDialogBuilder(this)
-                .setTitle("Aplikasi sempat crash")
-                .setMessage("Sebelumnya aplikasi tertutup karena error. Kirim log ke Claude supaya bisa diperbaiki?\n\n" + crash.take(600))
-                .setPositiveButton("Kirim log") { _, _ -> shareLog() }
-                .setNegativeButton("Nanti", null)
+                .setTitle(tr("Aplikasi sempat crash", "The app crashed"))
+                .setMessage(tr("Sebelumnya aplikasi tertutup karena error. Kirim log ke Claude supaya bisa diperbaiki?\n\n", "The app closed because of an error last time. Send the log to Claude so it can be fixed?\n\n") + crash.take(600))
+                .setPositiveButton(tr("Kirim log", "Send log")) { _, _ -> shareLog() }
+                .setNegativeButton(tr("Nanti", "Later"), null)
                 .show()
         }
     }
@@ -294,6 +295,10 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, px(10), 0, px(10))
                 setOnClickListener { drawer.closeDrawers(); afterOutputPicked = null; pickOutput.launch(null) }
             })
+            addView(term("> settings · ${if (Lang.en) "EN" else "ID"}", 11f, Hx.GREEN).apply {
+                setPadding(0, px(6), 0, px(10))
+                setOnClickListener { drawer.closeDrawers(); showSettings() }
+            })
             addView(term("> view log", 11f, Hx.GREEN).apply {
                 setPadding(0, px(6), 0, px(14))
                 setOnClickListener { drawer.closeDrawers(); showLogDialog() }
@@ -423,7 +428,7 @@ class MainActivity : AppCompatActivity() {
             else androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_UNLOCKED
         )
         if (b) {
-            panel.start("", msg ?: "Memproses…", "")
+            panel.start("", msg ?: tr("Memproses…", "Working…"), "")
             AppLog.tap = { level, line -> terminalFromLog(level, line) }
         } else {
             AppLog.tap = null
@@ -468,8 +473,30 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ log
 
+    // ------------------------------------------------------------------ settings
+
+    private fun showSettings() {
+        val langs = arrayOf("Bahasa Indonesia", "English")
+        MaterialAlertDialogBuilder(this)
+            .setTitle(tr("Setting · Bahasa", "Settings · Language"))
+            .setSingleChoiceItems(langs, if (Lang.en) 1 else 0) { d, which ->
+                d.dismiss()
+                val english = which == 1
+                if (english == Lang.en) return@setSingleChoiceItems
+                if (busy) {
+                    toast(tr("Tunggu proses selesai dulu", "Wait for the current task to finish"))
+                    return@setSingleChoiceItems
+                }
+                Lang.set(this, english)
+                AppLog.i("Bahasa diganti ke ${Lang.name}")
+                recreate()
+            }
+            .setNegativeButton(tr("Tutup", "Close"), null)
+            .show()
+    }
+
     private fun showLogDialog() {
-        val text = AppLog.recentImportant().ifBlank { "(log masih kosong)" }
+        val text = AppLog.recentImportant().ifBlank { tr("(log masih kosong)", "(log is empty)") }
         val tv = TextView(this).apply {
             this.text = text
             textSize = 11f
@@ -482,9 +509,9 @@ class MainActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Log • ${AppLog.buildLabel}")
             .setView(scroll)
-            .setPositiveButton("Kirim log") { _, _ -> shareLog() }
-            .setNeutralButton("Hapus log") { _, _ -> AppLog.clear(); toast("Log dihapus") }
-            .setNegativeButton("Tutup", null)
+            .setPositiveButton(tr("Kirim log", "Send log")) { _, _ -> shareLog() }
+            .setNeutralButton(tr("Hapus log", "Clear log")) { _, _ -> AppLog.clear(); toast(tr("Log dihapus", "Log cleared")) }
+            .setNegativeButton(tr("Tutup", "Close"), null)
             .show()
     }
 
@@ -498,10 +525,10 @@ class MainActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_SUBJECT, "Log Steamod Updater ${AppLog.buildLabel}")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(send, "Kirim log ke…"))
+            startActivity(Intent.createChooser(send, tr("Kirim log ke…", "Send log to…")))
         } catch (e: Exception) {
             AppLog.e("Gagal membagikan log", e)
-            Toast.makeText(this, "Gagal membagikan log: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, tr("Gagal membagikan log: ${e.message}", "Couldn't share the log: ${e.message}"), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -514,9 +541,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Durasi yang enak dibaca: 45 dtk, 2 mnt 5 dtk, 1 jam 3 mnt. */
     private fun fmtDur(secs: Long): String = when {
-        secs < 60 -> "$secs dtk"
-        secs < 3600 -> "${secs / 60} mnt" + if (secs % 60 != 0L) " ${secs % 60} dtk" else ""
-        else -> "${secs / 3600} jam" + if ((secs % 3600) / 60 != 0L) " ${(secs % 3600) / 60} mnt" else ""
+        secs < 60 -> "$secs ${tr("dtk", "s")}"
+        secs < 3600 -> "${secs / 60} ${tr("mnt", "min")}" + if (secs % 60 != 0L) " ${secs % 60} ${tr("dtk", "s")}" else ""
+        else -> "${secs / 3600} ${tr("jam", "h")}" + if ((secs % 3600) / 60 != 0L) " ${(secs % 3600) / 60} ${tr("mnt", "min")}" else ""
     }
 
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
@@ -545,14 +572,19 @@ class MainActivity : AppCompatActivity() {
         animateList = false
         if (list.isEmpty()) {
             val hint = if (game == Game.ZOMBOID)
-                "> no mods loaded for PROJECT ZOMBOID\n\n" +
+                "> no mods loaded for PROJECT ZOMBOID\n\n" + tr(
                     "[+] FOLDER : pilih folder Zomboid/mods (mis. di Zomdroid). ID Workshop dicari otomatis.\n" +
-                    "[+] LINK/ID: tempel link Workshop untuk download baru.\n\n> lalu tekan SCAN UPDATE_"
+                    "[+] LINK/ID: tempel link Workshop untuk download baru.\n\n> lalu tekan SCAN UPDATE_",
+                    "[+] FOLDER : pick the Zomboid/mods folder (e.g. in Zomdroid). Workshop IDs are found automatically.\n" +
+                    "[+] LINK/ID: paste a Workshop link to download a new mod.\n\n> then press SCAN UPDATE_")
             else
-                "> no mods loaded for RIMWORLD\n\n" +
+                "> no mods loaded for RIMWORLD\n\n" + tr(
                     "[+] FOLDER : pilih folder 1 mod, atau folder Mods berisi banyak mod.\n" +
                     "[+] ZIP    : pilih zip mod lama.\n" +
-                    "[+] LINK/ID: tempel link Workshop untuk download baru.\n\n> lalu tekan SCAN UPDATE_"
+                    "[+] LINK/ID: tempel link Workshop untuk download baru.\n\n> lalu tekan SCAN UPDATE_",
+                    "[+] FOLDER : pick one mod folder, or a Mods folder with many mods.\n" +
+                    "[+] ZIP    : pick an old mod zip.\n" +
+                    "[+] LINK/ID: paste a Workshop link to download a new mod.\n\n> then press SCAN UPDATE_")
             val v = ScanReveal(this).apply {
                 addView(term(hint, 12f, Hx.DIM).apply { setPadding(px(2), px(18), px(2), 0); setLineSpacing(px(3).toFloat(), 1f) })
             }
@@ -568,7 +600,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isFailed(m: ModEntry) =
-        m.status.startsWith("Gagal") || m.status.startsWith("Error") || m.status.startsWith("ID Workshop belum")
+        StatusKind.isFailed(m.status)
 
     private fun severity(m: ModEntry) = when {
         isFailed(m) -> 0
@@ -579,7 +611,7 @@ class MainActivity : AppCompatActivity() {
     private fun modCard(m: ModEntry): ScanReveal {
         val accent = when {
             m.updateAvailable -> Hx.AMBER
-            m.status.startsWith("Gagal") || m.status.startsWith("Error") || m.status.startsWith("ID Workshop belum") -> Hx.RED
+            StatusKind.isFailed(m.status) -> Hx.RED
             else -> Hx.GREEN
         }
         val box = LinearLayout(this).apply {
@@ -588,7 +620,7 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(term(m.displayName + "  ⧉", 14f, Hx.BRIGHT, bold = true).apply {
             // ketuk = salin nama, tekan lama = menu (salin folder, cari di Workshop, buka halaman)
-            setOnClickListener { copyText(m.displayName, "Nama mod") }
+            setOnClickListener { copyText(m.displayName, tr("Nama mod", "Mod name")) }
             setOnLongClickListener { modMenu(m); true }
         })
         val src = when (m.sourceType) {
@@ -612,8 +644,8 @@ class MainActivity : AppCompatActivity() {
         ).apply { setLineSpacing(px(2).toFloat(), 1f); setPadding(0, px(4), 0, 0) })
         val statusText = when {
             m.updateAvailable -> "!! " + m.status
-            m.status.startsWith("Terbaru") || m.status.startsWith("Berhasil") || m.status.startsWith("Sudah") -> "✓ " + m.status
-            m.status.startsWith("Gagal") || m.status.startsWith("Error") || m.status.startsWith("ID Workshop belum") -> "✗ " + m.status
+            StatusKind.isOk(m.status) -> "✓ " + m.status
+            StatusKind.isFailed(m.status) -> "✗ " + m.status
             else -> "> " + m.status
         }
         box.addView(term(statusText, 11.5f, accent, bold = true).apply {
@@ -625,18 +657,18 @@ class MainActivity : AppCompatActivity() {
             isEnabled = !busy && m.workshopId.isNotBlank() && (m.updateAvailable || m.sourceType == "none" || m.installedVersion.isEmpty())
         }
         val bForce = button("FORCE", small = true) {
-            MaterialAlertDialogBuilder(this).setTitle("Download ulang?")
-                .setMessage("Download ulang ${m.displayName} dari Workshop walaupun sudah terbaru?")
+            MaterialAlertDialogBuilder(this).setTitle(tr("Download ulang?", "Download again?"))
+                .setMessage(tr("Download ulang ${m.displayName} dari Workshop walaupun sudah terbaru?", "Download ${m.displayName} from the Workshop again even though it's up to date?"))
                 .setPositiveButton("Ya") { _, _ -> updateMods(listOf(m)) }
-                .setNegativeButton("Batal", null).show()
+                .setNegativeButton(tr("Batal", "Cancel"), null).show()
         }.apply { isEnabled = !busy && m.workshopId.isNotBlank() }
         val needSearch = m.game == Game.ZOMBOID.key && m.workshopId.isBlank() && m.sourceType == "folder"
         val bId = button(if (needSearch) "FIND ID" else "EDIT ID", small = true) {
             if (needSearch) {
                 MaterialAlertDialogBuilder(this).setTitle("ID Workshop: ${m.displayName}")
-                    .setPositiveButton("Cari otomatis") { _, _ -> discoverZomboidIds(listOf(m)) }
-                    .setNegativeButton("Isi manual") { _, _ -> askEditId(m) }
-                    .setNeutralButton("Batal", null).show()
+                    .setPositiveButton(tr("Cari otomatis", "Auto search")) { _, _ -> discoverZomboidIds(listOf(m)) }
+                    .setNegativeButton(tr("Isi manual", "Enter manually")) { _, _ -> askEditId(m) }
+                    .setNeutralButton(tr("Batal", "Cancel"), null).show()
             } else {
                 askEditId(m)
             }
@@ -678,14 +710,14 @@ class MainActivity : AppCompatActivity() {
     private fun copyText(text: String, label: String) {
         val cm = getSystemService(android.content.ClipboardManager::class.java)
         cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
-        Toast.makeText(this, "$label disalin: $text", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, tr("$label disalin: $text", "$label copied: $text"), Toast.LENGTH_SHORT).show()
     }
 
     private fun openUrl(url: String) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
-            toast("Tidak bisa membuka browser: ${e.message}")
+            toast(tr("Tidak bisa membuka browser: ${e.message}", "Can't open the browser: ${e.message}"))
         }
     }
 
@@ -695,16 +727,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun modMenu(m: ModEntry) {
         val items = mutableListOf<Pair<String, () -> Unit>>()
-        items += "Salin nama mod" to { copyText(m.displayName, "Nama mod") }
-        if (m.subPath.isNotBlank() && m.subPath != m.displayName) items += "Salin nama folder" to { copyText(m.subPath, "Nama folder") }
-        if (m.modId.isNotBlank()) items += "Salin id mod (mod.info)" to { copyText(m.modId, "ID mod") }
-        if (m.workshopId.isNotBlank()) items += "Salin ID Workshop" to { copyText(m.workshopId, "ID Workshop") }
-        items += "Cari di Steam Workshop" to { openUrl(workshopSearchUrl(m.displayName)) }
-        if (m.workshopId.isNotBlank()) items += "Buka halaman Workshop" to {
+        items += tr("Salin nama mod", "Copy mod name") to { copyText(m.displayName, tr("Nama mod", "Mod name")) }
+        if (m.subPath.isNotBlank() && m.subPath != m.displayName) items += tr("Salin nama folder", "Copy folder name") to { copyText(m.subPath, tr("Nama folder", "Folder name")) }
+        if (m.modId.isNotBlank()) items += tr("Salin id mod (mod.info)", "Copy mod id (mod.info)") to { copyText(m.modId, tr("ID mod", "Mod ID")) }
+        if (m.workshopId.isNotBlank()) items += tr("Salin ID Workshop", "Copy Workshop ID") to { copyText(m.workshopId, tr("ID Workshop", "Workshop ID")) }
+        items += tr("Cari di Steam Workshop", "Search Steam Workshop") to { openUrl(workshopSearchUrl(m.displayName)) }
+        if (m.workshopId.isNotBlank()) items += tr("Buka halaman Workshop", "Open Workshop page") to {
             openUrl("https://steamcommunity.com/sharedfiles/filedetails/?id=${m.workshopId}")
         }
-        if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += "Cari ID otomatis lagi" to { discoverZomboidIds(listOf(m)) }
-        items += "Isi / ubah ID Workshop" to { askEditId(m) }
+        if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += tr("Cari ID otomatis lagi", "Auto-find ID again") to { discoverZomboidIds(listOf(m)) }
+        items += tr("Isi / ubah ID Workshop", "Set / change Workshop ID") to { askEditId(m) }
         MaterialAlertDialogBuilder(this)
             .setTitle(m.displayName)
             .setItems(items.map { "> " + it.first }.toTypedArray()) { _, i -> items[i].second() }
@@ -718,19 +750,20 @@ class MainActivity : AppCompatActivity() {
         val b = MaterialAlertDialogBuilder(this)
             .setTitle("DEL · ${m.displayName}")
             .setMessage(
-                if (hasFiles) "Hapus dari daftar saja, atau hapus juga file mod-nya dari HP?\n\n" +
-                    "Kalau file dihapus, mod ini hilang dari game." + (if (m.sourceType == "zip") "\n(file zip-nya yang dihapus)" else "")
-                else "Hapus mod ini dari daftar?"
+                if (hasFiles) tr("Hapus dari daftar saja, atau hapus juga file mod-nya dari HP?\n\n" +
+                    "Kalau file dihapus, mod ini hilang dari game.", "Remove from the list only, or also delete the mod files from your phone?\n\n" +
+                    "If the files are deleted, this mod disappears from the game.") + (if (m.sourceType == "zip") tr("\n(file zip-nya yang dihapus)", "\n(the zip file is deleted)") else "")
+                else tr("Hapus mod ini dari daftar?", "Remove this mod from the list?")
             )
-            .setNeutralButton("Batal", null)
-            .setNegativeButton("Dari daftar saja") { _, _ -> removeFromList(m) }
+            .setNeutralButton(tr("Batal", "Cancel"), null)
+            .setNegativeButton(tr("Dari daftar saja", "List only")) { _, _ -> removeFromList(m) }
         if (hasFiles) {
-            b.setPositiveButton("Hapus file juga") { _, _ ->
+            b.setPositiveButton(tr("Hapus file juga", "Delete files too")) { _, _ ->
                 MaterialAlertDialogBuilder(this)
-                    .setTitle("Yakin hapus permanen?")
-                    .setMessage("Folder/file mod \"${m.displayName}\" akan dihapus dari HP dan tidak bisa dikembalikan.")
-                    .setPositiveButton("Ya, hapus") { _, _ -> deleteModFiles(m) }
-                    .setNegativeButton("Batal", null)
+                    .setTitle(tr("Yakin hapus permanen?", "Delete permanently?"))
+                    .setMessage(tr("Folder/file mod \"${m.displayName}\" akan dihapus dari HP dan tidak bisa dikembalikan.", "The mod folder/file \"${m.displayName}\" will be deleted from your phone and can't be restored."))
+                    .setPositiveButton(tr("Ya, hapus", "Yes, delete")) { _, _ -> deleteModFiles(m) }
+                    .setNegativeButton(tr("Batal", "Cancel"), null)
                     .show()
             }
         }
@@ -747,7 +780,7 @@ class MainActivity : AppCompatActivity() {
     private fun deleteModFiles(m: ModEntry) {
         if (busy) return
         lifecycleScope.launch {
-            setBusy(true, "Hapus mod")
+            setBusy(true, tr("Hapus mod", "Delete mod"))
             panel.start("DELETE · ${game.title.uppercase()}", m.displayName, "DELETE")
             try {
                 val ok = withContext(Dispatchers.IO) {
@@ -756,7 +789,7 @@ class MainActivity : AppCompatActivity() {
                             val dir = ModFiles.locateFolder(this@MainActivity, m)
                             if (dir == null) {
                                 // sudah dicek ulang: foldernya memang tidak ada → cukup buang dari daftar
-                                panel.log("SCAN", "folder ${m.subPath} tidak ada (sudah dicek ulang)")
+                                panel.log("SCAN", tr("folder ${m.subPath} tidak ada (sudah dicek ulang)", "folder ${m.subPath} not found (rescanned)"))
                                 return@withContext true
                             }
                             panel.log("RM", "-rf ${m.subPath.ifBlank { dir.name ?: "mod" }}/")
@@ -764,25 +797,25 @@ class MainActivity : AppCompatActivity() {
                         }
                         "zip" -> {
                             val doc = DocumentFile.fromSingleUri(this@MainActivity, Uri.parse(m.sourceUri))
-                                ?: throw Exception("File zip tidak ditemukan")
+                                ?: throw Exception(tr("File zip tidak ditemukan", "Zip file not found"))
                             panel.log("RM", doc.name ?: "mod.zip")
                             doc.delete()
                         }
                         else -> true
                     }
                 }
-                if (!ok) throw Exception("Android menolak menghapus (izin folder hilang?)")
-                panel.log("DONE", "${m.displayName} dihapus", "✓")
+                if (!ok) throw Exception(tr("Android menolak menghapus (izin folder hilang?)", "Android refused to delete (folder permission lost?)"))
+                panel.log("DONE", tr("${m.displayName} dihapus", "${m.displayName} deleted"), "✓")
                 AppLog.i("File mod dihapus: ${m.displayName} (${m.workshopId}) ${m.sourceUri}/${m.subPath}")
                 mods.remove(m)
                 store.save(mods)
-                panel.badge("SELESAI")
+                panel.badge(tr("SELESAI", "DONE"))
                 panel.fraction(1f)
-                toast("${m.displayName} dihapus")
+                toast(tr("${m.displayName} dihapus", "${m.displayName} deleted"))
             } catch (e: Exception) {
                 AppLog.e("Gagal hapus file mod ${m.displayName}", e)
-                panel.log("FAIL", e.message ?: "gagal", error = true)
-                toast("Gagal hapus: ${e.message}")
+                panel.log("FAIL", e.message ?: tr("gagal", "failed"), error = true)
+                toast(tr("Gagal hapus: ${e.message}", "Delete failed: ${e.message}"))
             }
             setBusy(false)
         }
@@ -820,7 +853,7 @@ class MainActivity : AppCompatActivity() {
     private fun addFromFolder(uri: Uri) {
         persist(uri)
         lifecycleScope.launch {
-            setBusy(true, "Membaca folder…")
+            setBusy(true, tr("Membaca folder…", "Reading folder…"))
             if (game == Game.ZOMBOID) {
                 addZomboidFolder(uri)
                 return@launch
@@ -828,7 +861,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val found = withContext(Dispatchers.IO) { ModFiles.scanTree(this@MainActivity, uri) }
                 if (found.isEmpty()) {
-                    toast("Tidak ada mod di folder itu (tidak ketemu folder About).")
+                    toast(tr("Tidak ada mod di folder itu (tidak ketemu folder About).", "No mods in that folder (no About folder found)."))
                 } else {
                     found.forEach {
                         upsert(ModEntry(
@@ -838,34 +871,34 @@ class MainActivity : AppCompatActivity() {
                             sourceUri = uri.toString(),
                             subPath = it.subPath,
                             localTime = it.localTime,
-                            status = if (it.workshopId == null) "ID Workshop tidak ketemu, tekan Ubah ID" else "Belum dicek",
+                            status = if (it.workshopId == null) tr("ID Workshop tidak ketemu, tekan Ubah ID", "Workshop ID not found, tap EDIT ID") else tr("Belum dicek", "Not checked"),
                         ))
                     }
                     store.save(mods)
-                    toast("${found.size} mod ditambahkan")
+                    toast(tr("${found.size} mod ditambahkan", "${found.size} mods added"))
                 }
             } catch (e: Exception) {
                 AppLog.e("Gagal membaca folder $uri", e)
-                toast("Gagal membaca folder: ${e.message}")
+                toast(tr("Gagal membaca folder: ${e.message}", "Couldn't read folder: ${e.message}"))
             }
             setBusy(false)
-            if (visible.any { it.status == "Belum dicek" }) checkUpdates()
+            if (visible.any { StatusKind.isUnchecked(it.status) }) checkUpdates()
         }
     }
 
     /** Tambah folder mod Project Zomboid, lalu cari ID Workshop-nya otomatis. */
     private suspend fun addZomboidFolder(uri: Uri) {
         val found = try {
-            panel.start("SCAN · PROJECT ZOMBOID", "Membaca folder mod", "SCAN")
+            panel.start("SCAN · PROJECT ZOMBOID", tr("Membaca folder mod", "Reading mod folders"), "SCAN")
             withContext(Dispatchers.IO) { ModFiles.scanZomboid(this@MainActivity, uri) { progress(it) } }
         } catch (e: Exception) {
             AppLog.e("Gagal membaca folder Zomboid $uri", e)
-            toast("Gagal membaca folder: ${e.message}")
+            toast(tr("Gagal membaca folder: ${e.message}", "Couldn't read folder: ${e.message}"))
             setBusy(false)
             return
         }
         if (found.isEmpty()) {
-            toast("Tidak ada mod Zomboid di folder itu (tidak ketemu mod.info).")
+            toast(tr("Tidak ada mod Zomboid di folder itu (tidak ketemu mod.info).", "No Zomboid mods in that folder (no mod.info found)."))
             setBusy(false)
             return
         }
@@ -876,13 +909,13 @@ class MainActivity : AppCompatActivity() {
                 sourceType = "folder",
                 sourceUri = uri.toString(),
                 subPath = it.subPath,
-                status = "Mencari ID Workshop…",
+                status = tr("Mencari ID Workshop…", "Searching Workshop ID…"),
                 game = Game.ZOMBOID.key,
                 modId = it.modId,
             ))
         }
         store.save(mods)
-        panel.log("SCAN", "${found.size} folder mod ditemukan", "OK")
+        panel.log("SCAN", tr("${found.size} folder mod ditemukan", "${found.size} mod folders found"), "OK")
         AppLog.i("Zomboid: ${found.size} mod di $uri")
         setBusy(false)
         val noId = visible.filter { it.workshopId.isBlank() && it.sourceType == "folder" }
@@ -896,11 +929,11 @@ class MainActivity : AppCompatActivity() {
     private fun discoverZomboidIds(list: List<ModEntry>) {
         if (busy || list.isEmpty()) return
         lifecycleScope.launch {
-            setBusy(true, "Cari ID Workshop")
+            setBusy(true, tr("Cari ID Workshop", "Find Workshop ID"))
             val t0 = System.currentTimeMillis()
-            panel.start("CARI ID WORKSHOP · ${list.size} MOD", "Steam Workshop", "SEARCH")
+            panel.start(tr("CARI ID WORKSHOP · ${list.size} MOD", "FIND WORKSHOP ID · ${list.size} MODS"), "Steam Workshop", "SEARCH")
             if (!ensureSteam()) {
-                list.forEach { it.status = "ID belum dicari. Login Steam lalu tekan CARI ID." }
+                list.forEach { it.status = tr("ID belum dicari. Login Steam lalu tekan CARI ID.", "ID not searched yet. Log in to Steam, then tap FIND ID.") }
                 store.save(mods)
                 setBusy(false)
                 return@launch
@@ -925,11 +958,11 @@ class MainActivity : AppCompatActivity() {
                             }
                             cands[m] = ids.toList()
                             val n = done.incrementAndGet()
-                            panel.log("SEARCH", "${m.name} → ${ids.size} kandidat", if (ids.isEmpty()) null else "OK")
+                            panel.log("SEARCH", tr("${m.name} → ${ids.size} kandidat", "${m.name} → ${ids.size} candidates"), if (ids.isEmpty()) null else "OK")
                             setFraction(0.3f * n / list.size)
                             panel.stats(
-                                "$n/${list.size}" to "dicari",
-                                fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
+                                "$n/${list.size}" to tr("dicari", "searched"),
+                                fmtDur((System.currentTimeMillis() - t0) / 1000) to tr("berjalan", "elapsed"),
                             )
                         }
                     }).forEach { it.get() }
@@ -939,7 +972,7 @@ class MainActivity : AppCompatActivity() {
             }
             // 2) verifikasi lewat daftar file (kandidat ke-1, lalu ke-2, ke-3 untuk yang belum cocok)
             panel.badge("VERIFY")
-            panel.title("Cocokkan isi item Workshop")
+            panel.title(tr("Cocokkan isi item Workshop", "Matching Workshop item contents"))
             val mfDir = File(cacheDir, "mfz")
             var matched = 0
             for (round in 0 until 5) {
@@ -947,7 +980,7 @@ class MainActivity : AppCompatActivity() {
                 if (pending.isEmpty()) break
                 val ids = pending.mapNotNull { cands[it]?.getOrNull(round) }.filter { !manifestCache.containsKey(it) }.distinct()
                 if (ids.isNotEmpty()) {
-                    panel.caption("VERIFY · PUTARAN ${round + 1} · ${ids.size} ITEM")
+                    panel.caption(tr("VERIFY · PUTARAN ${round + 1} · ${ids.size} ITEM", "VERIFY · ROUND ${round + 1} · ${ids.size} ITEMS"))
                     try {
                         val res = SteamManager.fetchManifests(
                             this@MainActivity, ids, mfDir,
@@ -970,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
                         val pre = ModFiles.findModPrefix(mf, m.subPath) ?: continue
                         m.workshopId = cid.toString()
                         m.contentPrefix = pre
-                        m.status = "Belum dicek"
+                        m.status = tr("Belum dicek", "Not checked")
                         matched++
                         panel.log("MATCH", "${m.name} → $cid", "OK")
                         break
@@ -983,16 +1016,16 @@ class MainActivity : AppCompatActivity() {
             list.filter { it.workshopId.isBlank() }.forEach {
                 val n = cands[it].orEmpty().size
                 it.status = if (n == 0)
-                    "ID Workshop belum ketemu: tidak ada hasil pencarian. Tekan lama judul → Cari di Workshop."
+                    tr("ID Workshop belum ketemu: tidak ada hasil pencarian. Tekan lama judul → Cari di Workshop.", "Workshop ID not found: no search results. Long-press the title → Search Steam Workshop.")
                 else
-                    "ID Workshop belum ketemu: $n hasil dicek, isinya tidak cocok. Tekan lama judul → Cari di Workshop."
+                    tr("ID Workshop belum ketemu: $n hasil dicek, isinya tidak cocok. Tekan lama judul → Cari di Workshop.", "Workshop ID not found: $n results checked, contents don't match. Long-press the title → Search Steam Workshop.")
                 panel.log("MISS", "${it.name} (${if (n == 0) "no result" else "$n no match"})", error = true)
             }
             store.save(mods)
             AppLog.i("Cari ID Zomboid: $matched/${list.size} cocok dalam ${(System.currentTimeMillis() - t0) / 1000} dtk")
-            panel.caption("CARI ID · SELESAI")
-            panel.title("$matched dari ${list.size} ketemu")
-            panel.badge("SELESAI")
+            panel.caption(tr("CARI ID · SELESAI", "FIND ID · DONE"))
+            panel.title(tr("$matched dari ${list.size} ketemu", "$matched of ${list.size} found"))
+            panel.badge(tr("SELESAI", "DONE"))
             panel.fraction(1f)
             setBusy(false)
             if (matched > 0) checkUpdates()
@@ -1011,17 +1044,17 @@ class MainActivity : AppCompatActivity() {
         uris.forEach { persist(it) }
         lifecycleScope.launch {
             if (game == Game.ZOMBOID) {
-                toast("File zip belum didukung untuk Project Zomboid. Pakai [+] FOLDER.")
+                toast(tr("File zip belum didukung untuk Project Zomboid. Pakai [+] FOLDER.", "Zip files aren't supported for Project Zomboid yet. Use [+] FOLDER."))
                 return@launch
             }
-            setBusy(true, "Membaca zip…")
+            setBusy(true, tr("Membaca zip…", "Reading zip…"))
             var added = 0
             for (uri in uris) {
                 try {
                     val name = fileName(uri)
                     val s = withContext(Dispatchers.IO) { ModFiles.scanZip(this@MainActivity, uri, name) }
                     if (s == null) {
-                        toast("${name ?: "Zip"}: bukan mod RimWorld (tidak ada About/About.xml)")
+                        toast("${name ?: "Zip"}: " + tr("bukan mod RimWorld (tidak ada About/About.xml)", "not a RimWorld mod (no About/About.xml)"))
                         continue
                     }
                     upsert(ModEntry(
@@ -1031,12 +1064,12 @@ class MainActivity : AppCompatActivity() {
                         sourceUri = uri.toString(),
                         zipPrefix = s.zipPrefix,
                         localTime = s.localTime,
-                        status = if (s.workshopId == null) "ID Workshop tidak ketemu, tekan Ubah ID" else "Belum dicek",
+                        status = if (s.workshopId == null) tr("ID Workshop tidak ketemu, tekan Ubah ID", "Workshop ID not found, tap EDIT ID") else tr("Belum dicek", "Not checked"),
                     ))
                     added++
                 } catch (e: Exception) {
                     AppLog.e("Gagal membaca zip $uri", e)
-                    toast("Gagal membaca zip: ${e.message}")
+                    toast(tr("Gagal membaca zip: ${e.message}", "Couldn't read zip: ${e.message}"))
                 }
             }
             store.save(mods)
@@ -1051,13 +1084,13 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
         MaterialAlertDialogBuilder(this)
-            .setTitle("Tambah dari link Workshop")
-            .setMessage("Tempel link atau ID mod. Bisa beberapa sekaligus (pisahkan dengan baris baru). Hasilnya disimpan di \"Folder hasil\".")
+            .setTitle(tr("Tambah dari link Workshop", "Add from Workshop link"))
+            .setMessage(tr("Tempel link atau ID mod. Bisa beberapa sekaligus (pisahkan dengan baris baru). Hasilnya disimpan di \"Folder hasil\".", "Paste a mod link or ID. You can add several at once (one per line). Downloads are saved to the output folder."))
             .setView(padded(input))
-            .setPositiveButton("Tambah") { _, _ ->
+            .setPositiveButton(tr("Tambah", "Add")) { _, _ ->
                 val ids = input.text.toString().split(Regex("""[\s,]+""")).mapNotNull { WorkshopApi.parseId(it) }
                 if (ids.isEmpty()) {
-                    toast("Link/ID tidak dikenali")
+                    toast(tr("Link/ID tidak dikenali", "Link/ID not recognized"))
                 } else {
                     ids.forEach { id ->
                         if (visible.none { it.workshopId == id && it.sourceType == "none" }) {
@@ -1069,27 +1102,27 @@ class MainActivity : AppCompatActivity() {
                     checkUpdates()
                 }
             }
-            .setNegativeButton("Batal", null)
+            .setNegativeButton(tr("Batal", "Cancel"), null)
             .show()
     }
 
     private fun askEditId(m: ModEntry) {
         val input = EditText(this).apply {
             setText(m.workshopId)
-            hint = "Link atau ID Workshop"
+            hint = tr("Link atau ID Workshop", "Workshop link or ID")
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("ID Workshop: ${m.displayName}")
-            .setMessage("Tempel link atau ID Workshop. Belum tahu? Tekan \"Cari\" untuk mencari nama mod ini di Steam Workshop, lalu salin link-nya.")
-            .setNeutralButton("Cari") { _, _ -> openUrl(workshopSearchUrl(m.displayName)) }
+            .setMessage(tr("Tempel link atau ID Workshop. Belum tahu? Tekan \"Cari\" untuk mencari nama mod ini di Steam Workshop, lalu salin link-nya.", "Paste a Workshop link or ID. Don't know it? Tap \"Search\" to look up this mod on Steam Workshop, then copy its link."))
+            .setNeutralButton(tr("Cari", "Search")) { _, _ -> openUrl(workshopSearchUrl(m.displayName)) }
             .setView(padded(input))
-            .setPositiveButton("Simpan") { _, _ ->
+            .setPositiveButton(tr("Simpan", "Save")) { _, _ ->
                 val id = WorkshopApi.parseId(input.text.toString())
                 if (id == null) {
-                    toast("Link/ID tidak dikenali")
+                    toast(tr("Link/ID tidak dikenali", "Link/ID not recognized"))
                 } else {
                     m.workshopId = id
-                    m.status = "Belum dicek"
+                    m.status = tr("Belum dicek", "Not checked")
                     m.remoteTime = 0
                     m.contentPrefix = ""
                     m.installedVersion = ""
@@ -1098,7 +1131,7 @@ class MainActivity : AppCompatActivity() {
                     checkUpdates()
                 }
             }
-            .setNegativeButton("Batal", null)
+            .setNegativeButton(tr("Batal", "Cancel"), null)
             .show()
     }
 
@@ -1113,13 +1146,13 @@ class MainActivity : AppCompatActivity() {
         if (busy) return
         val targets = visible.filter { it.workshopId.isNotBlank() }
         if (targets.isEmpty()) {
-            toast("Belum ada mod dengan ID Workshop")
+            toast(tr("Belum ada mod dengan ID Workshop", "No mods with a Workshop ID yet"))
             return
         }
         lifecycleScope.launch {
             setBusy(true, "Steam Workshop")
             val t0 = System.currentTimeMillis()
-            panel.start("CEK UPDATE · ${targets.size} MOD", "Steam Workshop", "CEK VERSI")
+            panel.start(tr("CEK UPDATE · ${targets.size} MOD", "CHECK UPDATES · ${targets.size} MODS"), "Steam Workshop", tr("CEK VERSI", "VERSIONS"))
             panel.log("QUERY", "PublishedFileDetails × ${targets.size}")
             try {
                 AppLog.i("Cek update ${targets.size} mod")
@@ -1129,11 +1162,11 @@ class MainActivity : AppCompatActivity() {
                     val d = details[m.workshopId]
                     when {
                         d == null || !d.ok -> {
-                            m.status = "Error: mod tidak ditemukan di Workshop (dihapus/privat?)"
+                            m.status = tr("Error: mod tidak ditemukan di Workshop (dihapus/privat?)", "Error: mod not found on the Workshop (removed/private?)")
                             m.updateAvailable = false
                         }
                         d.appId != 0 && d.appId != game.appId -> {
-                            m.status = "Error: ini bukan mod ${game.title}"
+                            m.status = tr("Error: ini bukan mod ${game.title}", "Error: this is not a ${game.title} mod")
                             m.updateAvailable = false
                         }
                         else -> {
@@ -1144,11 +1177,11 @@ class MainActivity : AppCompatActivity() {
                             when {
                                 m.installedVersion.isNotEmpty() -> {
                                     m.updateAvailable = m.installedVersion != d.contentId
-                                    m.status = if (m.updateAvailable) "Ada update!" else "Terbaru ✓"
+                                    m.status = if (m.updateAvailable) tr("Ada update!", "Update available!") else tr("Terbaru ✓", "Up to date ✓")
                                 }
                                 m.sourceType == "none" -> {
                                     m.updateAvailable = true
-                                    m.status = "Siap di-download"
+                                    m.status = tr("Siap di-download", "Ready to download")
                                 }
                                 else -> needContent += m
                             }
@@ -1157,23 +1190,23 @@ class MainActivity : AppCompatActivity() {
                 }
                 store.save(mods)
                 renderList()
-                panel.log("RESULT", "${details.size}/${targets.size} mod ditemukan", "OK")
+                panel.log("RESULT", tr("${details.size}/${targets.size} mod ditemukan", "${details.size}/${targets.size} mods found"), "OK")
 
                 // Mod yang versinya belum diketahui: bandingkan isi file dengan daftar file resmi di Steam.
                 if (needContent.isNotEmpty()) {
                     AppLog.i("${needContent.size} mod perlu dicek isinya")
                     ModFiles.clearRescanCache()
-                    showProgress("${needContent.size} mod perlu dicek isinya, butuh login Steam…")
+                    showProgress(tr("${needContent.size} mod perlu dicek isinya, butuh login Steam…", "${needContent.size} mods need a content check, Steam login required…"))
                     if (!ensureSteam()) {
                         needContent.forEach {
                             it.updateAvailable = false
-                            it.status = "Versi belum diketahui. Login Steam lalu tekan Cek update lagi."
+                            it.status = tr("Versi belum diketahui. Login Steam lalu tekan Cek update lagi.", "Version unknown. Log in to Steam, then check again.")
                         }
                     } else {
                         refreshSteamStatus()
                         // 1) Ambil semua daftar file sekaligus dalam satu sesi Steam (jauh lebih cepat).
                         val mfDir = File(cacheDir, "mf")
-                        panel.title("Daftar file resmi")
+                        panel.title(tr("Daftar file resmi", "Official file lists"))
                         panel.badge("MANIFEST")
                         val nameOf = needContent.associate { it.workshopId.toLong() to it.displayName }
                         var mfDone = 0
@@ -1192,9 +1225,9 @@ class MainActivity : AppCompatActivity() {
                                 onManifest = { id, r ->
                                     mfDone++
                                     panel.stats(
-                                        "$mfDone/${needContent.size}" to "daftar file",
-                                        "4" to "jalur paralel",
-                                        fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
+                                        "$mfDone/${needContent.size}" to tr("daftar file", "file lists"),
+                                        "4" to tr("jalur paralel", "parallel lanes"),
+                                        fmtDur((System.currentTimeMillis() - t0) / 1000) to tr("berjalan", "elapsed"),
                                     )
                                     r.onSuccess { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.size} files", "OK") }
                                     r.onFailure { panel.log("MANIFEST", "${nameOf[id] ?: id} · ${it.message}", error = true) }
@@ -1207,36 +1240,36 @@ class MainActivity : AppCompatActivity() {
                         // 2) Bandingkan dengan file lokal.
                         var diffMods = 0
                         var removedDup = 0
-                        panel.badge("CEK ISI")
+                        panel.badge(tr("CEK ISI", "CONTENT"))
                         needContent.forEachIndexed { i, m ->
                             val prefix = ""
-                            panel.caption("CEK ISI · ${i + 1} DARI ${needContent.size}")
+                            panel.caption(tr("CEK ISI · ${i + 1} DARI ${needContent.size}", "CONTENT CHECK · ${i + 1} OF ${needContent.size}"))
                             panel.title(m.displayName)
                             panel.stats(
                                 "${i + 1}/${needContent.size}" to "mod",
-                                "$diffMods" to "perlu update",
-                                fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
+                                "$diffMods" to tr("perlu update", "need update"),
+                                fmtDur((System.currentTimeMillis() - t0) / 1000) to tr("berjalan", "elapsed"),
                             )
-                            progress("Membandingkan file…")
+                            progress(tr("Membandingkan file…", "Comparing files…"))
                             setFraction(0.5f + 0.5f * i / needContent.size)
                             try {
                                 val remote = manifests[m.workshopId.toLong()]?.getOrThrow()
-                                    ?: throw Exception("daftar file tidak didapat dari Steam")
-                                if (remote.isEmpty()) throw Exception("daftar file dari Steam kosong")
+                                    ?: throw Exception(tr("daftar file tidak didapat dari Steam", "file list not received from Steam"))
+                                if (remote.isEmpty()) throw Exception(tr("daftar file dari Steam kosong", "file list from Steam is empty"))
                                 val r = compareContent(m, remote) { progress(prefix + it) }
                                 m.remoteFileCount = r.total
                                 if (r.same) {
                                     m.installedVersion = m.remoteVersion
                                     m.updateAvailable = false
-                                    m.status = "Terbaru ✓ (isi sama dengan Workshop)"
+                                    m.status = tr("Terbaru ✓ (isi sama dengan Workshop)", "Up to date ✓ (same contents as Workshop)")
                                     panel.log("SHA1", "${m.displayName} · ${r.total} files", "MATCH")
                                 } else {
                                     diffMods++
-                                    panel.log("DIFF", "${m.displayName} · ${r.different.size}/${r.total} beda", "UPDATE")
+                                    panel.log("DIFF", tr("${m.displayName} · ${r.different.size}/${r.total} beda", "${m.displayName} · ${r.different.size}/${r.total} differ"), "UPDATE")
                                     m.updateAvailable = true
                                     // Tandai versi lama, supaya cek berikutnya tidak perlu bandingkan isi lagi.
                                     m.installedVersion = OUTDATED
-                                    m.status = "Ada update! (${r.different.size} dari ${r.total} file berbeda)"
+                                    m.status = tr("Ada update! (${r.different.size} dari ${r.total} file berbeda)", "Update available! (${r.different.size} of ${r.total} files differ)")
                                     AppLog.i("${m.displayName}: file berbeda ${r.different.take(15)}")
                                 }
                             } catch (e: FolderMissing) {
@@ -1247,41 +1280,41 @@ class MainActivity : AppCompatActivity() {
                                     mods.remove(m)
                                     removedDup++
                                     AppLog.i("Duplikat dibuang (folder lama tidak ada): ${m.displayName} ${m.sourceUri}")
-                                    panel.log("CLEAN", "${m.displayName}: duplikat lama dibuang", "OK")
+                                    panel.log("CLEAN", tr("${m.displayName}: duplikat lama dibuang", "${m.displayName}: old duplicate removed"), "OK")
                                 } else {
                                     AppLog.w("Cek isi ${m.workshopId} (${m.displayName}): folder tidak ditemukan ${m.sourceUri} / ${m.subPath}")
-                                    panel.log("FAIL", "${m.displayName}: folder tidak ada (scan ulang)", error = true)
+                                    panel.log("FAIL", tr("${m.displayName}: folder tidak ada (scan ulang)", "${m.displayName}: folder missing (rescanned)"), error = true)
                                     m.updateAvailable = false
-                                    m.status = "Gagal: folder mod tidak ada di HP (sudah dicek ulang). Tekan DEL untuk buang dari daftar."
+                                    m.status = tr("Gagal: folder mod tidak ada di HP (sudah dicek ulang). Tekan DEL untuk buang dari daftar.", "Failed: mod folder is not on the phone (rescanned). Tap DEL to remove it from the list.")
                                 }
                             } catch (e: Exception) {
                                 AppLog.e("Cek isi ${m.workshopId} (${m.displayName}) gagal", e)
                                 panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
                                 m.updateAvailable = false
-                                m.status = "Gagal cek isi: ${e.message ?: e.javaClass.simpleName}"
+                                m.status = tr("Gagal cek isi: ${e.message ?: e.javaClass.simpleName}", "Failed content check: ${e.message ?: e.javaClass.simpleName}")
                             }
                             store.save(mods)
                             renderList()
                         }
                         mfDir.deleteRecursively()
-                        if (removedDup > 0) toast("$removedDup duplikat lama dibuang dari daftar")
+                        if (removedDup > 0) toast(tr("$removedDup duplikat lama dibuang dari daftar", "$removedDup old duplicates removed from the list"))
                     }
                 }
                 store.save(mods)
                 renderList()
                 val updates = targets.count { it.updateAvailable && it in mods }
-                panel.caption("CEK UPDATE · SELESAI")
-                panel.title(if (updates == 0) "Semua terbaru" else "$updates mod perlu update")
-                panel.badge("SELESAI")
+                panel.caption(tr("CEK UPDATE · SELESAI", "CHECK UPDATES · DONE"))
+                panel.title(if (updates == 0) tr("Semua terbaru", "All up to date") else tr("$updates mod perlu update", "$updates mods need updating"))
+                panel.badge(tr("SELESAI", "DONE"))
                 panel.fraction(1f)
                 panel.detail("")
-                panel.log("DONE", "${targets.size} mod dicek dalam ${fmtDur((System.currentTimeMillis() - t0) / 1000)}", "✓")
+                panel.log("DONE", tr("${targets.size} mod dicek dalam ${fmtDur((System.currentTimeMillis() - t0) / 1000)}", "${targets.size} mods checked in ${fmtDur((System.currentTimeMillis() - t0) / 1000)}"), "✓")
                 setBusy(false)
-                toast(if (updates == 0) "Semua mod sudah terbaru" else "$updates mod perlu diupdate")
+                toast(if (updates == 0) tr("Semua mod sudah terbaru", "All mods are up to date") else tr("$updates mod perlu diupdate", "$updates mods need updating"))
             } catch (e: Exception) {
                 AppLog.e("Gagal cek update", e)
                 setBusy(false)
-                toast("Gagal cek: ${e.message}. Cek koneksi internet.")
+                toast(tr("Gagal cek: ${e.message}. Cek koneksi internet.", "Check failed: ${e.message}. Check your internet connection."))
             }
         }
     }
@@ -1292,12 +1325,12 @@ class MainActivity : AppCompatActivity() {
         if (m.game != Game.ZOMBOID.key) return remote
         if (m.contentPrefix.isEmpty() || remote.none { it.path.startsWith(m.contentPrefix) }) {
             m.contentPrefix = ModFiles.findModPrefix(remote, m.subPath.ifBlank { m.name })
-                ?: throw Exception("Item Workshop ini tidak berisi folder mod \"${m.subPath}\". Cek ID-nya.")
+                ?: throw Exception(tr("Item Workshop ini tidak berisi folder mod \"${m.subPath}\". Cek ID-nya.", "This Workshop item doesn't contain the mod folder \"${m.subPath}\". Check the ID."))
         }
         return ModFiles.scope(remote, m.contentPrefix)
     }
 
-    private class FolderMissing : Exception("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
+    private class FolderMissing : Exception(tr("Folder mod tidak ditemukan / izin hilang. Tambahkan ulang foldernya.", "Mod folder not found / permission lost. Add the folder again."))
 
     private suspend fun compareContent(
         m: ModEntry,
@@ -1312,7 +1345,7 @@ class MainActivity : AppCompatActivity() {
                 ModFiles.compareFolder(this@MainActivity, dir, remote, onProgress)
             }
             "zip" -> ModFiles.compareZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, remote, onProgress)
-            else -> throw Exception("Tidak ada file lokal untuk dibandingkan")
+            else -> throw Exception(tr("Tidak ada file lokal untuk dibandingkan", "No local files to compare"))
         }
     }
 
@@ -1321,18 +1354,18 @@ class MainActivity : AppCompatActivity() {
     private fun updateAll() {
         val list = visible.filter { it.updateAvailable && it.workshopId.isNotBlank() }
         if (list.isEmpty()) {
-            toast("Tidak ada mod yang perlu diupdate. Tekan \"Cek update\" dulu.")
+            toast(tr("Tidak ada mod yang perlu diupdate. Tekan \"Cek update\" dulu.", "No mods need updating. Tap SCAN UPDATE first."))
             return
         }
         val total = list.sumOf { it.remoteSize }
         MaterialAlertDialogBuilder(this)
-            .setTitle("Update ${list.size} mod?")
+            .setTitle(tr("Update ${list.size} mod?", "Update ${list.size} mods?"))
             .setMessage(
-                (if (total > 0) "Total download sekitar ${fmtSize(total)}.\n\n" else "") +
-                    "Biarkan aplikasi tetap terbuka sampai selesai."
+                (if (total > 0) tr("Total download sekitar ${fmtSize(total)}.\n\n", "Total download about ${fmtSize(total)}.\n\n") else "") +
+                    tr("Biarkan aplikasi tetap terbuka sampai selesai.", "Keep the app open until it finishes.")
             )
             .setPositiveButton("Update") { _, _ -> updateMods(list) }
-            .setNegativeButton("Batal", null)
+            .setNegativeButton(tr("Batal", "Cancel"), null)
             .show()
     }
 
@@ -1340,22 +1373,22 @@ class MainActivity : AppCompatActivity() {
         if (busy) return
         if (list.any { it.sourceType == "none" } && outputRoot() == null) {
             MaterialAlertDialogBuilder(this)
-                .setTitle("Pilih folder hasil")
+                .setTitle(tr("Pilih folder hasil", "Choose output folder"))
                 .setMessage(
-                    if (game == Game.ZOMBOID) "Mod dari link akan disimpan di folder yang kamu pilih. Pilih folder Zomboid/mods milik Zomdroid supaya langsung terpasang."
-                    else "Mod dari link akan disimpan di folder yang kamu pilih (misalnya Download/RimMods)."
+                    if (game == Game.ZOMBOID) tr("Mod dari link akan disimpan di folder yang kamu pilih. Pilih folder Zomboid/mods milik Zomdroid supaya langsung terpasang.", "Mods from links are saved to the folder you choose. Pick Zomdroid's Zomboid/mods folder so they're installed right away.")
+                    else tr("Mod dari link akan disimpan di folder yang kamu pilih (misalnya Download/RimMods).", "Mods from links are saved to the folder you choose (for example Download/RimMods).")
                 )
-                .setPositiveButton("Pilih") { _, _ ->
+                .setPositiveButton(tr("Pilih", "Choose")) { _, _ ->
                     afterOutputPicked = { updateMods(list) }
                     pickOutput.launch(null)
                 }
-                .setNegativeButton("Batal", null)
+                .setNegativeButton(tr("Batal", "Cancel"), null)
                 .show()
             return
         }
         lifecycleScope.launch {
-            setBusy(true, "Menghubungkan ke Steam…")
-            panel.start("UPDATE MOD · ${list.size} MOD", "Menghubungkan ke Steam…", "LOGIN")
+            setBusy(true, tr("Menghubungkan ke Steam…", "Connecting to Steam…"))
+            panel.start(tr("UPDATE MOD · ${list.size} MOD", "UPDATE · ${list.size} MODS"), tr("Menghubungkan ke Steam…", "Connecting to Steam…"), "LOGIN")
             if (!ensureSteam()) {
                 setBusy(false)
                 return@launch
@@ -1368,7 +1401,7 @@ class MainActivity : AppCompatActivity() {
             list.forEachIndexed { i, m ->
                 states[i] = m.displayName to ProgressPanel.ItemState.CURRENT
                 panel.items(states.toList())
-                panel.caption("UPDATE MOD · ${i + 1} DARI ${list.size}")
+                panel.caption(tr("UPDATE MOD · ${i + 1} DARI ${list.size}", "UPDATE · ${i + 1} OF ${list.size}"))
                 panel.title(m.displayName)
                 panel.badge("DOWNLOAD")
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
@@ -1378,12 +1411,12 @@ class MainActivity : AppCompatActivity() {
                     states[i] = m.displayName to ProgressPanel.ItemState.DONE
                     panel.log("DONE", m.displayName, "✓")
                 } catch (e: SteamManager.LoginRequired) {
-                    m.status = "Gagal: perlu login Steam lagi"
+                    m.status = tr("Gagal: perlu login Steam lagi", "Failed: Steam login needed again")
                     states[i] = m.displayName to ProgressPanel.ItemState.FAILED
-                    panel.log("FAIL", "${m.displayName}: perlu login lagi", error = true)
+                    panel.log("FAIL", tr("${m.displayName}: perlu login lagi", "${m.displayName}: login needed again"), error = true)
                 } catch (e: Exception) {
                     AppLog.e("Update ${m.workshopId} (${m.displayName}) gagal", e)
-                    m.status = "Gagal: ${e.message ?: e.javaClass.simpleName}"
+                    m.status = tr("Gagal: ${e.message ?: e.javaClass.simpleName}", "Failed: ${e.message ?: e.javaClass.simpleName}")
                     states[i] = m.displayName to ProgressPanel.ItemState.FAILED
                     panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
                 }
@@ -1391,13 +1424,13 @@ class MainActivity : AppCompatActivity() {
                 store.save(mods)
                 runOnUiThread { renderList() }
             }
-            panel.caption("UPDATE MOD · SELESAI")
-            panel.title("$ok dari ${list.size} berhasil")
-            panel.badge("SELESAI")
+            panel.caption(tr("UPDATE MOD · SELESAI", "UPDATE · DONE"))
+            panel.title(tr("$ok dari ${list.size} berhasil", "$ok of ${list.size} succeeded"))
+            panel.badge(tr("SELESAI", "DONE"))
             panel.fraction(1f)
             panel.detail("")
             setBusy(false)
-            toast("Selesai: $ok dari ${list.size} mod berhasil")
+            toast(tr("Selesai: $ok dari ${list.size} mod berhasil", "Done: $ok of ${list.size} mods succeeded"))
         }
     }
 
@@ -1405,10 +1438,10 @@ class MainActivity : AppCompatActivity() {
     private fun copyLog(onProgress: (String) -> Unit): (String) -> Unit = { msg ->
         onProgress(msg)
         when {
-            msg.startsWith("Menyalin ") -> panel.log("COPY", msg.removePrefix("Menyalin "), "✓")
-            msg.startsWith("Mengemas ") -> panel.log("ZIP", msg.removePrefix("Mengemas "), "✓")
-            msg.startsWith("Menghapus file lama") -> panel.log("CLEAN", "hapus file versi lama")
-            msg.startsWith("Menghapus ") -> panel.log("DEL", msg.removePrefix("Menghapus "), "✓")
+            msg.startsWith(tr("Menyalin ", "Copying ")) -> panel.log("COPY", msg.removePrefix(tr("Menyalin ", "Copying ")), "✓")
+            msg.startsWith(tr("Mengemas ", "Packing ")) -> panel.log("ZIP", msg.removePrefix(tr("Mengemas ", "Packing ")), "✓")
+            msg.startsWith(tr("Menghapus file lama", "Removing old files")) -> panel.log("CLEAN", tr("hapus file versi lama", "remove old version files"))
+            msg.startsWith(tr("Menghapus ", "Removing ")) -> panel.log("DEL", msg.removePrefix(tr("Menghapus ", "Removing ")), "✓")
         }
     }
 
@@ -1437,36 +1470,36 @@ class MainActivity : AppCompatActivity() {
             var target: DocumentFile? = null
             if (m.sourceType == "folder") {
                 target = ModFiles.locateFolder(this@MainActivity, m)
-                    ?: throw Exception("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.")
-                if (!target.canWrite()) throw Exception("Tidak ada izin menulis ke folder mod lama")
-                panel.badge("CEK ISI")
-                onProgress("Ambil daftar file dari Steam…")
+                    ?: throw Exception(tr("Folder mod lama tidak ditemukan / izin hilang. Tambahkan ulang foldernya.", "Old mod folder not found / permission lost. Add the folder again."))
+                if (!target.canWrite()) throw Exception(tr("Tidak ada izin menulis ke folder mod lama", "No permission to write to the old mod folder"))
+                panel.badge(tr("CEK ISI", "CONTENT"))
+                onProgress(tr("Ambil daftar file dari Steam…", "Getting file list from Steam…"))
                 val mfDir = File(cacheDir, "mf1/${m.workshopId}")
                 try {
                     val remote = scopeFor(m, SteamManager.fetchManifest(this@MainActivity, m.workshopId.toLong(), mfDir) {})
                     panel.log("MANIFEST", "${remote.size} files", "OK")
                     m.remoteFileCount = remote.size
-                    onProgress("Membandingkan dengan file di HP…")
+                    onProgress(tr("Membandingkan dengan file di HP…", "Comparing with files on the phone…"))
                     val p = ModFiles.planFolderUpdate(this@MainActivity, target, remote, onProgress)
                     plan = p
-                    panel.log("PLAN", "${p.changed.size} file berubah · ${p.obsolete.size} dihapus", "OK")
+                    panel.log("PLAN", tr("${p.changed.size} file berubah · ${p.obsolete.size} dihapus", "${p.changed.size} files changed · ${p.obsolete.size} removed"), "OK")
                     AppLog.i("Rencana update ${m.workshopId}: ${p.changed.size} berubah, ${p.obsolete.size} usang (dari ${remote.size})")
                 } catch (e: Exception) {
                     AppLog.e("Cek isi sebelum update gagal, download semua file", e)
-                    panel.log("PLAN", "gagal (${e.message}), download semua", error = true)
+                    panel.log("PLAN", tr("gagal (${e.message}), download semua", "failed (${e.message}), downloading everything"), error = true)
                 } finally {
                     mfDir.deleteRecursively()
                 }
                 if (plan != null && plan.isEmpty) {
                     m.updateAvailable = false
                     m.installedVersion = m.remoteVersion
-                    m.status = "Sudah terbaru ✓ (isi sama dengan Workshop)"
+                    m.status = tr("Sudah terbaru ✓ (isi sama dengan Workshop)", "Already up to date ✓ (same contents as Workshop)")
                     onFraction(1f)
                     return@withContext
                 }
             }
             panel.badge("DOWNLOAD")
-            onProgress("Download dari Steam…")
+            onProgress(tr("Download dari Steam…", "Downloading from Steam…"))
             // Download = 0..80%, salin ke folder = 80..100%
             val t0 = System.currentTimeMillis()
             val bytes = java.util.concurrent.atomic.AtomicLong(0)
@@ -1489,9 +1522,9 @@ class MainActivity : AppCompatActivity() {
                 val left = if (size > 0 && speed > 0) ((size - got).coerceAtLeast(0) / speed).toLong() else -1
                 panel.stats(
                     (if (fileTotal > 0) "${files.get()}/$fileTotal" else "${files.get()}") to "file",
-                    fmtSize(got) to (if (size > 0) "dari ${fmtSize(size)}" else "terunduh"),
-                    "${fmtSize(speed.toLong())}/s" to "kecepatan",
-                    (if (left >= 0) "~${fmtDur(left)}" else "-") to "sisa",
+                    fmtSize(got) to (if (size > 0) tr("dari ${fmtSize(size)}", "of ${fmtSize(size)}") else tr("terunduh", "downloaded")),
+                    "${fmtSize(speed.toLong())}/s" to tr("kecepatan", "speed"),
+                    (if (left >= 0) "~${fmtDur(left)}" else "-") to tr("sisa", "left"),
                 )
                 onProgress("Download ${fmtSize(got)}" + if (size > 0) " / ${fmtSize(size)}" else "")
             }
@@ -1521,14 +1554,14 @@ class MainActivity : AppCompatActivity() {
                     dlStats()
                 },
             )
-            panel.badge("MENYALIN")
+            panel.badge(tr("MENYALIN", "COPYING"))
             val copyTotal = ModFiles.downloadedFiles(work).size
             val copyFrac: (Float) -> Unit = { f ->
                 onFraction(0.8f + f * 0.2f)
                 panel.stats(
-                    "${(f * copyTotal).toInt()}/$copyTotal" to "file disalin",
-                    fmtSize(bytes.get().coerceAtLeast(size)) to "ukuran",
-                    fmtDur((System.currentTimeMillis() - t0) / 1000) to "berjalan",
+                    "${(f * copyTotal).toInt()}/$copyTotal" to tr("file disalin", "files copied"),
+                    fmtSize(bytes.get().coerceAtLeast(size)) to tr("ukuran", "size"),
+                    fmtDur((System.currentTimeMillis() - t0) / 1000) to tr("berjalan", "elapsed"),
                 )
             }
             // Zomboid: isi folder mod ada di dalam "mods/<folder>/" pada item Workshop
@@ -1542,7 +1575,7 @@ class MainActivity : AppCompatActivity() {
                         // hanya tulis file yang berubah + hapus file usang
                         ModFiles.applyChanges(this@MainActivity, dir, src, plan, copyLog(onProgress), copyFrac)
                     } else {
-                        if (!src.isDirectory) throw Exception("Folder mod tidak ada di hasil download (${m.contentPrefix})")
+                        if (!src.isDirectory) throw Exception(tr("Folder mod tidak ada di hasil download (${m.contentPrefix})", "Mod folder missing from the download (${m.contentPrefix})"))
                         ModFiles.replaceFolder(this@MainActivity, dir, src, copyLog(onProgress), copyFrac)
                     }
                 }
@@ -1550,7 +1583,7 @@ class MainActivity : AppCompatActivity() {
                     ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, copyLog(onProgress), copyFrac)
                 }
                 else -> {
-                    val out = outputRoot() ?: throw Exception("Folder hasil belum dipilih")
+                    val out = outputRoot() ?: throw Exception(tr("Folder hasil belum dipilih", "Output folder not chosen yet"))
                     val zMods = work.walkTopDown().maxDepth(3)
                         .firstOrNull { it.isDirectory && it.name.equals("mods", true) }
                     if (m.game == Game.ZOMBOID.key && zMods != null) {
@@ -1571,7 +1604,7 @@ class MainActivity : AppCompatActivity() {
             m.updateAvailable = false
             m.installedVersion = m.remoteVersion
             AppLog.i("Berhasil update ${m.workshopId} (${m.displayName})")
-            m.status = "Berhasil diupdate ✓ (${fmt(m.remoteTime)})"
+            m.status = tr("Berhasil diupdate ✓ (${fmt(m.remoteTime)})", "Updated ✓ (${fmt(m.remoteTime)})")
         } finally {
             work.deleteRecursively()
         }
@@ -1591,7 +1624,7 @@ class MainActivity : AppCompatActivity() {
             steamStatus.text = t
             steamButton.text = "LOGOUT"
         } else {
-            steamStatus.text = "> steam_session: NONE\n  (perlu login untuk download)"
+            steamStatus.text = "> steam_session: NONE\n  " + tr("(perlu login untuk download)", "(login needed to download)")
             steamButton.text = "LOGIN"
         }
     }
@@ -1600,10 +1633,10 @@ class MainActivity : AppCompatActivity() {
         if (SteamManager.savedAccount(this) != null || SteamManager.loggedIn) {
             SteamManager.logout(this)
             refreshSteamStatus()
-            toast("Sudah logout")
+            toast(tr("Sudah logout", "Logged out"))
         } else {
             lifecycleScope.launch {
-                setBusy(true, "Login Steam…")
+                setBusy(true, tr("Login Steam…", "Steam login…"))
                 ensureSteam()
                 setBusy(false)
                 refreshSteamStatus()
@@ -1619,16 +1652,16 @@ class MainActivity : AppCompatActivity() {
         } catch (_: SteamManager.LoginRequired) {
         } catch (e: Exception) {
             AppLog.e("Tidak bisa tersambung ke Steam", e)
-            toast("Tidak bisa tersambung ke Steam: ${e.message}")
+            toast(tr("Tidak bisa tersambung ke Steam: ${e.message}", "Can't connect to Steam: ${e.message}"))
             return false
         }
         while (true) {
             val cred = askCredentials() ?: return false
             try {
-                progress("Login sebagai ${cred.first}…")
+                progress(tr("Login sebagai ${cred.first}…", "Logging in as ${cred.first}…"))
                 SteamManager.loginWithPassword(this, cred.first, cred.second, UiLogin())
                 refreshSteamStatus()
-                toast("Login berhasil")
+                toast(tr("Login berhasil", "Login successful"))
                 return true
             } catch (e: Exception) {
                 val cause = (e.cause ?: e)
@@ -1637,14 +1670,14 @@ class MainActivity : AppCompatActivity() {
                     return false
                 }
                 AppLog.e("Login Steam gagal", e)
-                toast("Login gagal: ${cause.message ?: cause.javaClass.simpleName}")
+                toast(tr("Login gagal: ${cause.message ?: cause.javaClass.simpleName}", "Login failed: ${cause.message ?: cause.javaClass.simpleName}"))
             }
         }
     }
 
     private suspend fun askCredentials(): Pair<String, String>? = suspendCancellableCoroutine { cont ->
         val user = EditText(this).apply {
-            hint = "Username Steam"
+            hint = tr("Username Steam", "Steam username")
             setText(SteamManager.savedAccount(this@MainActivity) ?: "")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
@@ -1657,7 +1690,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(px(20), px(8), px(20), 0)
             addView(user); addView(pass)
             addView(TextView(this@MainActivity).apply {
-                text = "Login langsung ke server Steam (sama seperti RimDroid). Password tidak disimpan; yang disimpan hanya token login di HP ini. Akun harus punya ${game.title}."
+                text = tr("Login langsung ke server Steam (sama seperti RimDroid). Password tidak disimpan; yang disimpan hanya token login di HP ini. Akun harus punya ${game.title}.", "Logs in directly to Steam's servers (same as RimDroid). The password isn't stored; only a login token is kept on this phone. The account must own ${game.title}.")
                 textSize = 12f
                 alpha = 0.7f
                 setPadding(0, px(8), 0, 0)
@@ -1665,7 +1698,7 @@ class MainActivity : AppCompatActivity() {
         }
         var resumed = false
         MaterialAlertDialogBuilder(this)
-            .setTitle("Login Steam")
+            .setTitle(tr("Login Steam", "Steam login"))
             .setView(box)
             .setCancelable(false)
             .setPositiveButton("Login") { _, _ ->
@@ -1674,7 +1707,7 @@ class MainActivity : AppCompatActivity() {
                 resumed = true
                 cont.resume(if (u.isBlank() || p.isBlank()) null else u to p)
             }
-            .setNegativeButton("Batal") { _, _ -> resumed = true; cont.resume(null) }
+            .setNegativeButton(tr("Batal", "Cancel")) { _, _ -> resumed = true; cont.resume(null) }
             .setOnDismissListener { if (!resumed) cont.resume(null) }
             .show()
     }
@@ -1694,36 +1727,40 @@ class MainActivity : AppCompatActivity() {
             }
 
         override suspend fun chooseApproveInApp(): Boolean = dialog { b, finish ->
-            b.setTitle("Verifikasi Steam Guard")
-                .setMessage("Pilih cara verifikasi login:")
-                .setPositiveButton("Setujui di app Steam") { _, _ -> finish(true) }
-                .setNegativeButton("Masukkan kode") { _, _ -> finish(false) }
+            b.setTitle(tr("Verifikasi Steam Guard", "Steam Guard verification"))
+                .setMessage(tr("Pilih cara verifikasi login:", "Choose how to verify the login:"))
+                .setPositiveButton(tr("Setujui di app Steam", "Approve in the Steam app")) { _, _ -> finish(true) }
+                .setNegativeButton(tr("Masukkan kode", "Enter code")) { _, _ -> finish(false) }
         }
 
         override suspend fun waitApproved(): Boolean = dialog { b, finish ->
-            b.setTitle("Setujui di aplikasi Steam")
+            b.setTitle(tr("Setujui di aplikasi Steam", "Approve in the Steam app"))
                 .setMessage(
-                    "1. Buka aplikasi Steam di HP-mu.\n" +
+                    tr("1. Buka aplikasi Steam di HP-mu.\n" +
                         "2. Tekan \"Approve / Setujui\" pada permintaan login \"Steamod Updater\".\n" +
                         "3. Kembali ke sini, lalu tekan tombol \"Sudah disetujui\".\n\n" +
-                        "Tidak apa-apa kalau koneksi sempat putus saat kamu pindah aplikasi, nanti otomatis tersambung lagi."
+                        "Tidak apa-apa kalau koneksi sempat putus saat kamu pindah aplikasi, nanti otomatis tersambung lagi.",
+                        "1. Open the Steam app on your phone.\n" +
+                        "2. Tap \"Approve\" on the \"Steamod Updater\" sign-in request.\n" +
+                        "3. Come back here and tap \"I approved it\".\n\n" +
+                        "It's fine if the connection drops while you switch apps; it reconnects automatically.")
                 )
-                .setPositiveButton("Sudah disetujui") { _, _ -> finish(true) }
-                .setNegativeButton("Batal") { _, _ -> finish(false) }
+                .setPositiveButton(tr("Sudah disetujui", "I approved it")) { _, _ -> finish(true) }
+                .setNegativeButton(tr("Batal", "Cancel")) { _, _ -> finish(false) }
         }
 
         override suspend fun askCode(isEmail: Boolean, hint: String?, previousWrong: Boolean): String? = dialog { b, finish ->
             val input = EditText(this@MainActivity).apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
-                this.hint = "Kode"
+                this.hint = tr("Kode", "Code")
             }
-            val msg = (if (previousWrong) "Kode salah, coba lagi.\n" else "") +
-                if (isEmail) "Steam mengirim kode ke email ${hint ?: "kamu"}." else "Buka aplikasi Steam → Steam Guard, lalu masukkan kode 5 karakternya."
-            b.setTitle(if (isEmail) "Kode dari email" else "Kode Steam Guard")
+            val msg = (if (previousWrong) tr("Kode salah, coba lagi.\n", "Wrong code, try again.\n") else "") +
+                if (isEmail) tr("Steam mengirim kode ke email ${hint ?: "kamu"}.", "Steam sent a code to ${hint ?: "your"} email.") else tr("Buka aplikasi Steam → Steam Guard, lalu masukkan kode 5 karakternya.", "Open the Steam app → Steam Guard, then enter the 5-character code.")
+            b.setTitle(if (isEmail) tr("Kode dari email", "Code from email") else tr("Kode Steam Guard", "Steam Guard code"))
                 .setMessage(msg)
                 .setView(padded(input))
                 .setPositiveButton("OK") { _, _ -> finish(input.text.toString().trim().uppercase().ifBlank { null }) }
-                .setNegativeButton("Batal") { _, _ -> finish(null) }
+                .setNegativeButton(tr("Batal", "Cancel")) { _, _ -> finish(null) }
         }
     }
 }
