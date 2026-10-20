@@ -611,9 +611,7 @@ class MainActivity : AppCompatActivity() {
                 askEditId(m)
             }
         }.apply { isEnabled = !busy }
-        val bDel = button("DEL", small = true) {
-            mods.remove(m); store.save(mods); renderList()
-        }.apply { isEnabled = !busy }
+        val bDel = button("DEL", small = true) { askDelete(m) }.apply { isEnabled = !busy }
         box.addView(row(bUpdate, bForce, bId, bDel).apply { setPadding(0, 0, 0, 0) })
 
         val inner = LinearLayout(this).apply {
@@ -631,6 +629,79 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = px(4); bottomMargin = px(4)
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ hapus mod
+
+    private fun askDelete(m: ModEntry) {
+        val hasFiles = m.sourceType == "folder" || m.sourceType == "zip"
+        val b = MaterialAlertDialogBuilder(this)
+            .setTitle("DEL · ${m.displayName}")
+            .setMessage(
+                if (hasFiles) "Hapus dari daftar saja, atau hapus juga file mod-nya dari HP?\n\n" +
+                    "Kalau file dihapus, mod ini hilang dari game." + (if (m.sourceType == "zip") "\n(file zip-nya yang dihapus)" else "")
+                else "Hapus mod ini dari daftar?"
+            )
+            .setNeutralButton("Batal", null)
+            .setNegativeButton("Dari daftar saja") { _, _ -> removeFromList(m) }
+        if (hasFiles) {
+            b.setPositiveButton("Hapus file juga") { _, _ ->
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Yakin hapus permanen?")
+                    .setMessage("Folder/file mod \"${m.displayName}\" akan dihapus dari HP dan tidak bisa dikembalikan.")
+                    .setPositiveButton("Ya, hapus") { _, _ -> deleteModFiles(m) }
+                    .setNegativeButton("Batal", null)
+                    .show()
+            }
+        }
+        b.show()
+    }
+
+    private fun removeFromList(m: ModEntry) {
+        mods.remove(m)
+        store.save(mods)
+        AppLog.i("Dihapus dari daftar: ${m.displayName} (${m.workshopId})")
+        renderList()
+    }
+
+    private fun deleteModFiles(m: ModEntry) {
+        if (busy) return
+        lifecycleScope.launch {
+            setBusy(true, "Hapus mod")
+            panel.start("DELETE · ${game.title.uppercase()}", m.displayName, "DELETE")
+            try {
+                val ok = withContext(Dispatchers.IO) {
+                    when (m.sourceType) {
+                        "folder" -> {
+                            val dir = ModFiles.resolveFolder(this@MainActivity, m)
+                                ?: throw Exception("Folder mod tidak ditemukan (mungkin sudah terhapus)")
+                            panel.log("RM", "-rf ${m.subPath.ifBlank { dir.name ?: "mod" }}/")
+                            dir.delete()
+                        }
+                        "zip" -> {
+                            val doc = DocumentFile.fromSingleUri(this@MainActivity, Uri.parse(m.sourceUri))
+                                ?: throw Exception("File zip tidak ditemukan")
+                            panel.log("RM", doc.name ?: "mod.zip")
+                            doc.delete()
+                        }
+                        else -> true
+                    }
+                }
+                if (!ok) throw Exception("Android menolak menghapus (izin folder hilang?)")
+                panel.log("DONE", "${m.displayName} dihapus", "✓")
+                AppLog.i("File mod dihapus: ${m.displayName} (${m.workshopId}) ${m.sourceUri}/${m.subPath}")
+                mods.remove(m)
+                store.save(mods)
+                panel.badge("SELESAI")
+                panel.fraction(1f)
+                toast("${m.displayName} dihapus")
+            } catch (e: Exception) {
+                AppLog.e("Gagal hapus file mod ${m.displayName}", e)
+                panel.log("FAIL", e.message ?: "gagal", error = true)
+                toast("Gagal hapus: ${e.message}")
+            }
+            setBusy(false)
         }
     }
 
