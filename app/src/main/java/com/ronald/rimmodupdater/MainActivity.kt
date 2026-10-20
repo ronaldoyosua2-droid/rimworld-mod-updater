@@ -593,7 +593,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         list.forEachIndexed { i, m ->
-            val card = modCard(m)
+            val card = try {
+                modCard(m)
+            } catch (e: Exception) {
+                AppLog.e("Gagal menampilkan kartu ${m.workshopId} (${m.name}) status='${m.status}'", e)
+                return@forEachIndexed
+            }
             listContainer.addView(card)
             if (anim && i < 14) card.reveal(120L + i * 70L, 380)
         }

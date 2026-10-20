@@ -69,21 +69,51 @@ object StatusText {
         "Gagal: {0}" to "Failed: {0}",
     )
 
-    private fun regex(tpl: String) = Regex(
-        "^" + tpl.split(Regex("""\{\d}""")).joinToString("(.*?)") { Regex.escape(it) } + "$",
-        RegexOption.DOT_MATCHES_ALL,
-    )
-
-    private val compiled = pairs.map { (id, en) -> Triple(regex(id), regex(en), id to en) }
-
-    fun localize(s: String): String {
-        for ((rid, ren, p) in compiled) {
-            val (from, to) = if (Lang.en) rid to p.second else ren to p.first
-            val m = from.find(s) ?: continue
-            var out = to
-            m.groupValues.drop(1).forEachIndexed { i, v -> out = out.replace("{$i}", v) }
-            return out
+    /** Pecah template jadi potongan teks tetap: "a {0} b {1} c" → [a , b , c]. */
+    private fun pieces(tpl: String): List<String> {
+        val out = mutableListOf<String>()
+        var rest = tpl
+        var n = 0
+        while (true) {
+            val k = rest.indexOf("{$n}")
+            if (k < 0) { out += rest; return out }
+            out += rest.substring(0, k)
+            rest = rest.substring(k + "{$n}".length)
+            n++
         }
-        return s
+    }
+
+    /** Cocokkan [s] dengan template; hasilnya isi tiap {n}, atau null kalau tidak cocok. */
+    private fun match(s: String, tpl: String): List<String>? {
+        val p = pieces(tpl)
+        if (p.size == 1) return if (s == tpl) emptyList() else null
+        if (!s.startsWith(p.first()) || !s.endsWith(p.last()) || s.length < p.first().length + p.last().length) return null
+        val vals = mutableListOf<String>()
+        var pos = p.first().length
+        val end = s.length - p.last().length
+        for (i in 1 until p.size - 1) {
+            val k = s.indexOf(p[i], pos)
+            if (k < 0 || k > end) return null
+            vals += s.substring(pos, k)
+            pos = k + p[i].length
+        }
+        if (pos > end) return null
+        vals += s.substring(pos, end)
+        return vals
+    }
+
+    fun localize(s: String): String = try {
+        var result = s
+        for ((id, en) in pairs) {
+            val (from, to) = if (Lang.en) id to en else en to id
+            val vals = match(s, from) ?: continue
+            var out = to
+            vals.forEachIndexed { i, v -> out = out.replace("{$i}", v) }
+            result = out
+            break
+        }
+        result
+    } catch (e: Exception) {
+        s
     }
 }
