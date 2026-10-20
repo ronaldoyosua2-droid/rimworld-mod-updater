@@ -576,7 +576,11 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(px(12), px(10), px(12), px(10))
         }
-        box.addView(term(m.displayName, 14f, Hx.BRIGHT, bold = true))
+        box.addView(term(m.displayName + "  ⧉", 14f, Hx.BRIGHT, bold = true).apply {
+            // ketuk = salin nama, tekan lama = menu (salin folder, cari di Workshop, buka halaman)
+            setOnClickListener { copyText(m.displayName, "Nama mod") }
+            setOnLongClickListener { modMenu(m); true }
+        })
         val src = when (m.sourceType) {
             "folder" -> "folder"
             "zip" -> "zip"
@@ -646,6 +650,42 @@ class MainActivity : AppCompatActivity() {
                 topMargin = px(4); bottomMargin = px(4)
             }
         }
+    }
+
+    // ------------------------------------------------------------------ salin & cari
+
+    private fun copyText(text: String, label: String) {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+        Toast.makeText(this, "$label disalin: $text", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            toast("Tidak bisa membuka browser: ${e.message}")
+        }
+    }
+
+    private fun workshopSearchUrl(q: String) =
+        "https://steamcommunity.com/workshop/browse/?appid=${game.appId}&searchtext=" +
+            java.net.URLEncoder.encode(q, "UTF-8") + "&browsesort=textsearch&section=readytouseitems"
+
+    private fun modMenu(m: ModEntry) {
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        items += "Salin nama mod" to { copyText(m.displayName, "Nama mod") }
+        if (m.subPath.isNotBlank() && m.subPath != m.displayName) items += "Salin nama folder" to { copyText(m.subPath, "Nama folder") }
+        if (m.workshopId.isNotBlank()) items += "Salin ID Workshop" to { copyText(m.workshopId, "ID Workshop") }
+        items += "Cari di Steam Workshop" to { openUrl(workshopSearchUrl(m.displayName)) }
+        if (m.workshopId.isNotBlank()) items += "Buka halaman Workshop" to {
+            openUrl("https://steamcommunity.com/sharedfiles/filedetails/?id=${m.workshopId}")
+        }
+        items += "Isi / ubah ID Workshop" to { askEditId(m) }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(m.displayName)
+            .setItems(items.map { "> " + it.first }.toTypedArray()) { _, i -> items[i].second() }
+            .show()
     }
 
     // ------------------------------------------------------------------ hapus mod
@@ -1003,6 +1043,8 @@ class MainActivity : AppCompatActivity() {
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("ID Workshop: ${m.displayName}")
+            .setMessage("Tempel link atau ID Workshop. Belum tahu? Tekan \"Cari\" untuk mencari nama mod ini di Steam Workshop, lalu salin link-nya.")
+            .setNeutralButton("Cari") { _, _ -> openUrl(workshopSearchUrl(m.displayName)) }
             .setView(padded(input))
             .setPositiveButton("Simpan") { _, _ ->
                 val id = WorkshopApi.parseId(input.text.toString())
