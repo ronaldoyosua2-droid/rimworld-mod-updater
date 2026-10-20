@@ -36,6 +36,8 @@ data class ModEntry(
     var contentPrefix: String = "",
     /** Zomboid: "id=" dari mod.info (dipakai untuk mencari ID Workshop). */
     var modId: String = "",
+    /** Isi lokal sudah pernah dicocokkan dengan item Workshop ini (cek ID salah). */
+    var coverageChecked: Boolean = false,
 ) {
     /** Zomboid: satu item Workshop bisa berisi banyak mod, jadi tampilkan nama mod lokal. */
     val displayName: String
@@ -60,6 +62,7 @@ data class ModEntry(
         put("game", game)
         put("contentPrefix", contentPrefix)
         put("modId", modId)
+        put("coverageChecked", coverageChecked)
     }
 
     companion object {
@@ -82,6 +85,7 @@ data class ModEntry(
             game = o.optString("game", "rimworld").ifBlank { "rimworld" },
             contentPrefix = o.optString("contentPrefix"),
             modId = o.optString("modId"),
+            coverageChecked = o.optBoolean("coverageChecked"),
         )
     }
 }

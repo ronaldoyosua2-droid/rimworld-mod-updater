@@ -667,11 +667,11 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("Ya") { _, _ -> updateMods(listOf(m)) }
                 .setNegativeButton(tr("Batal", "Cancel"), null).show()
         }.apply { isEnabled = !busy && m.workshopId.isNotBlank() }
-        val needSearch = m.game == Game.ZOMBOID.key && m.workshopId.isBlank() && m.sourceType == "folder"
+        val needSearch = m.game == Game.ZOMBOID.key && m.sourceType == "folder" && (m.workshopId.isBlank() || StatusKind.isSuspect(m.status))
         val bId = button(if (needSearch) "FIND ID" else "EDIT ID", small = true) {
             if (needSearch) {
                 CmdDialog(this).setTitle("ID Workshop: ${m.displayName}")
-                    .setPositiveButton(tr("Cari otomatis", "Auto search")) { _, _ -> discoverZomboidIds(listOf(m)) }
+                    .setPositiveButton(tr("Cari otomatis", "Auto search")) { _, _ -> reverifyIds(listOf(m)) }
                     .setNegativeButton(tr("Isi manual", "Enter manually")) { _, _ -> askEditId(m) }
                     .setNeutralButton(tr("Batal", "Cancel"), null).show()
             } else {
@@ -740,7 +740,7 @@ class MainActivity : AppCompatActivity() {
         if (m.workshopId.isNotBlank()) items += tr("Buka halaman Workshop", "Open Workshop page") to {
             openUrl("https://steamcommunity.com/sharedfiles/filedetails/?id=${m.workshopId}")
         }
-        if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += tr("Cari ID otomatis lagi", "Auto-find ID again") to { discoverZomboidIds(listOf(m)) }
+        if (m.game == Game.ZOMBOID.key && m.sourceType == "folder") items += tr("Cari ID otomatis lagi", "Auto-find ID again") to { reverifyIds(listOf(m)) }
         items += tr("Isi / ubah ID Workshop", "Set / change Workshop ID") to { askEditId(m) }
         CmdDialog(this)
             .setTitle(m.displayName)
@@ -939,6 +939,22 @@ class MainActivity : AppCompatActivity() {
      * Cari ID Workshop untuk folder mod Zomboid: cari nama mod di Workshop, lalu pastikan item itu
      * benar-benar berisi folder "mods/<nama folder>/" lewat daftar file resminya.
      */
+    /** ID lama yang ikut dicek ulang saat "Cari ID otomatis lagi". */
+    private val hintIds = HashMap<ModEntry, Long>()
+
+    /** Cari ulang ID: ID sekarang dikosongkan tapi tetap ikut dibandingkan sebagai kandidat. */
+    private fun reverifyIds(list: List<ModEntry>) {
+        if (busy) return
+        list.forEach { m ->
+            m.workshopId.toLongOrNull()?.let { hintIds[m] = it }
+            m.workshopId = ""
+            m.contentPrefix = ""
+            m.installedVersion = ""
+            m.updateAvailable = false
+        }
+        discoverZomboidIds(list)
+    }
+
     private fun discoverZomboidIds(list: List<ModEntry>) {
         if (busy || list.isEmpty()) return
         lifecycleScope.launch {
@@ -961,6 +977,7 @@ class MainActivity : AppCompatActivity() {
                     pool.invokeAll(list.map { m ->
                         java.util.concurrent.Callable {
                             val ids = LinkedHashSet<Long>()
+                            hintIds.remove(m)?.let { ids += it }
                             for (q in searchQueries(m)) {
                                 try {
                                     WorkshopSearch.search(game.appId, q, 4).forEach { ids += it.toLong() }
@@ -988,8 +1005,12 @@ class MainActivity : AppCompatActivity() {
             panel.title(tr("Cocokkan isi item Workshop", "Matching Workshop item contents"))
             val mfDir = File(cacheDir, "mfz")
             var matched = 0
+            // skor kecocokan terbaik per mod: (ID, awalan folder, skor 0..1)
+            val best = HashMap<ModEntry, Triple<Long, String, Double>>()
+            val localOf = HashMap<ModEntry, Map<String, Long>>()
             for (round in 0 until 5) {
-                val pending = list.filter { it.workshopId.isBlank() }
+                // lanjut cari kandidat lain selama belum ada yang benar-benar cocok
+                val pending = list.filter { it.workshopId.isBlank() && (best[it]?.third ?: 0.0) < 0.9 }
                 if (pending.isEmpty()) break
                 val ids = pending.mapNotNull { cands[it]?.getOrNull(round) }.filter { !manifestCache.containsKey(it) }.distinct()
                 if (ids.isNotEmpty()) {
@@ -1010,23 +1031,42 @@ class MainActivity : AppCompatActivity() {
                         AppLog.e("Verifikasi ID gagal", e)
                     }
                 }
-                pending.forEach { m ->
-                    for (cid in cands[m].orEmpty()) {
-                        val mf = manifestCache[cid] ?: continue
-                        val pre = ModFiles.findModPrefix(mf, m.subPath) ?: continue
-                        m.workshopId = cid.toString()
-                        m.contentPrefix = pre
-                        m.status = tr("Belum dicek", "Not checked")
-                        matched++
-                        panel.log("MATCH", "${m.name} → $cid", "OK")
-                        break
+                withContext(Dispatchers.IO) {
+                    pending.forEach { m ->
+                        val loc = localOf.getOrPut(m) {
+                            try { ModFiles.locateFolder(this@MainActivity, m)?.let { ModFiles.localSizes(this@MainActivity, it) } } catch (_: Exception) { null } ?: emptyMap()
+                        }
+                        for (cid in cands[m].orEmpty()) {
+                            val mf = manifestCache[cid] ?: continue
+                            val pre = ModFiles.findModPrefix(mf, m.subPath) ?: continue
+                            val sc = ModFiles.similarity(loc, ModFiles.scope(mf, pre), mf.size)
+                            if (sc > (best[m]?.third ?: -1.0)) best[m] = Triple(cid, pre, sc)
+                        }
                     }
                 }
-                store.save(mods)
-                renderList()
             }
             mfDir.deleteRecursively()
-            list.filter { it.workshopId.isBlank() }.forEach {
+            // pilih kandidat dengan isi paling mirip; kalau terlalu beda, jangan dipasang (bisa versi B41/modpack lain)
+            list.filter { it.workshopId.isBlank() }.forEach { m ->
+                val b = best[m] ?: return@forEach
+                val pct = (b.third * 100).toInt().coerceAtMost(100)
+                if (b.third >= 0.5) {
+                    m.workshopId = b.first.toString()
+                    m.contentPrefix = b.second
+                    m.installedVersion = ""
+                    m.coverageChecked = false
+                    m.status = tr("Belum dicek", "Not checked")
+                    matched++
+                    panel.log("MATCH", "${m.name} → ${b.first} ($pct%)", "OK")
+                } else {
+                    m.status = tr("ID Workshop belum pasti: kandidat terbaik ${b.first} hanya $pct% cocok. Cek di Workshop lalu isi manual.",
+                        "Workshop ID uncertain: best candidate ${b.first} is only $pct% similar. Check the Workshop and enter it manually.")
+                    panel.log("WEAK", "${m.name} → ${b.first} ($pct%)", error = true)
+                }
+            }
+            store.save(mods)
+            renderList()
+            list.filter { it.workshopId.isBlank() && best[it] == null }.forEach {
                 val n = cands[it].orEmpty().size
                 it.status = if (n == 0)
                     tr("ID Workshop belum ketemu: tidak ada hasil pencarian. Tekan lama judul → Cari di Workshop.", "Workshop ID not found: no search results. Long-press the title → Search Steam Workshop.")
@@ -1189,6 +1229,8 @@ class MainActivity : AppCompatActivity() {
                             m.remoteVersion = d.contentId
                             m.remoteSize = d.fileSize
                             when {
+                                // versi lama yang belum pernah dicocokkan isinya: cek isi sekali (deteksi ID salah)
+                                m.installedVersion == OUTDATED && !m.coverageChecked && m.sourceType != "none" -> needContent += m
                                 m.installedVersion.isNotEmpty() -> {
                                     m.updateAvailable = m.installedVersion != d.contentId
                                     m.status = if (m.updateAvailable) tr("Ada update!", "Update available!") else tr("Terbaru ✓", "Up to date ✓")
@@ -1272,7 +1314,17 @@ class MainActivity : AppCompatActivity() {
                                 if (remote.isEmpty()) throw Exception(tr("daftar file dari Steam kosong", "file list from Steam is empty"))
                                 val r = compareContent(m, remote) { progress(prefix + it) }
                                 m.remoteFileCount = r.total
-                                if (r.same) {
+                                m.coverageChecked = true
+                                if (!r.same && r.coverage < 0.5) {
+                                    // sebagian besar file lokal tidak ada di item ini → hampir pasti item Workshop yang salah
+                                    val pct = (r.coverage * 100).toInt()
+                                    m.updateAvailable = false
+                                    m.installedVersion = ""
+                                    m.status = tr("ID kemungkinan salah: hanya $pct% file lokal ada di item Workshop ini (versi B41/B42 lain atau modpack?). Tekan FIND ID.",
+                                        "ID probably wrong: only $pct% of local files exist in this Workshop item (other B41/B42 version or a modpack?). Tap FIND ID.")
+                                    panel.log("WRONG", "${m.displayName} · $pct% match", error = true)
+                                    AppLog.i("${m.displayName}: ID ${m.workshopId} kemungkinan salah, cakupan $pct%")
+                                } else if (r.same) {
                                     m.installedVersion = m.remoteVersion
                                     m.updateAvailable = false
                                     m.status = tr("Terbaru ✓ (isi sama dengan Workshop)", "Up to date ✓ (same contents as Workshop)")

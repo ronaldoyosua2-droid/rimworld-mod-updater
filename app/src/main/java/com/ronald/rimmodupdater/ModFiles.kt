@@ -254,7 +254,8 @@ object ModFiles {
 
     data class RemoteFile(val path: String, val size: Long, val sha1: String)
 
-    data class CompareResult(val total: Int, val different: List<String>) {
+    /** [coverage] = bagian file lokal yang juga ada di item Workshop (rendah = ID kemungkinan salah). */
+    data class CompareResult(val total: Int, val different: List<String>, val coverage: Double = 1.0) {
         val same: Boolean get() = different.isEmpty()
     }
 
@@ -321,6 +322,8 @@ object ModFiles {
         val local = mutableMapOf<String, Pair<Uri, Long>>()
         listTree(ctx, dir.uri, DocumentsContract.getDocumentId(dir.uri), "", local)
         val lower = local.entries.associate { it.key.lowercase() to it.value }
+        val remoteSet = remote.mapTo(HashSet()) { it.path.lowercase() }
+        val coverage = if (lower.isEmpty()) 0.0 else lower.keys.count { it in remoteSet }.toDouble() / lower.size
         // Tahap 1 (cepat): cek file yang hilang / ukurannya beda. Kalau sudah ada beda, tidak perlu hitung hash.
         val diff = mutableListOf<String>()
         val toHash = mutableListOf<Pair<RemoteFile, Uri>>()
@@ -332,7 +335,7 @@ object ModFiles {
                 needsHash(rf) -> toHash += rf to l.first
             }
         }
-        if (diff.isNotEmpty() || toHash.isEmpty()) return CompareResult(remote.size, diff)
+        if (diff.isNotEmpty() || toHash.isEmpty()) return CompareResult(remote.size, diff, coverage)
 
         // Tahap 2: hitung hash file kode/data, beberapa sekaligus.
         val done = java.util.concurrent.atomic.AtomicInteger(0)
@@ -350,7 +353,34 @@ object ModFiles {
         } finally {
             pool.shutdown()
         }
-        return CompareResult(remote.size, diff)
+        return CompareResult(remote.size, diff, coverage)
+    }
+
+    /** Daftar file lokal di folder mod: path (huruf kecil) → ukuran. */
+    fun localSizes(ctx: Context, dir: DocumentFile): Map<String, Long> {
+        val local = mutableMapOf<String, Pair<Uri, Long>>()
+        listTree(ctx, dir.uri, DocumentsContract.getDocumentId(dir.uri), "", local)
+        return local.entries.associate { it.key.lowercase() to it.value.second }
+    }
+
+    /**
+     * Seberapa cocok isi folder lokal dengan bagian item Workshop ([scoped], path relatif folder mod).
+     * Dihitung dari file lokal yang ada di Workshop (versi lama tetap tinggi, versi B41/B42 lain
+     * atau modpack berbeda jadi rendah) + bonus ukuran sama, + sedikit bonus kalau item itu
+     * memang hanya berisi mod ini (bukan modpack besar).
+     */
+    fun similarity(local: Map<String, Long>, scoped: List<RemoteFile>, itemFileCount: Int): Double {
+        if (local.isEmpty() || scoped.isEmpty()) return 0.0
+        val remote = scoped.associate { it.path.lowercase() to it.size }
+        var present = 0
+        var sameSize = 0
+        local.forEach { (p, size) ->
+            val r = remote[p] ?: return@forEach
+            present++
+            if (r == size) sameSize++
+        }
+        val share = scoped.size.toDouble() / itemFileCount.coerceAtLeast(1)
+        return 0.7 * present / local.size + 0.25 * sameSize / local.size + 0.05 * share
     }
 
     fun compareZip(ctx: Context, zipUri: Uri, prefix: String, remote: List<RemoteFile>, onProgress: (String) -> Unit): CompareResult {

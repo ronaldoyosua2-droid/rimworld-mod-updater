@@ -26,13 +26,15 @@ fun tr(id: String, en: String): String = if (Lang.en) en else id
 
 /** Status mod (tersimpan dalam bahasa saat dicek) — dikenali dalam kedua bahasa. */
 object StatusKind {
-    private val failed = listOf("Gagal", "Error", "ID Workshop belum", "Failed", "Workshop ID not")
+    private val failed = listOf("Gagal", "Error", "ID Workshop belum", "ID kemungkinan salah", "Failed", "Workshop ID not", "Workshop ID uncertain", "ID probably wrong")
+    private val suspect = listOf("ID kemungkinan salah", "ID probably wrong", "ID Workshop belum pasti", "Workshop ID uncertain")
     private val ok = listOf("Terbaru", "Berhasil", "Sudah", "Up to date", "Updated", "Already")
     private val unchecked = setOf("Belum dicek", "Not checked")
 
     fun isFailed(s: String) = failed.any { s.startsWith(it) }
     fun isOk(s: String) = ok.any { s.startsWith(it) }
     fun isUnchecked(s: String) = s in unchecked
+    fun isSuspect(s: String) = suspect.any { s.startsWith(it) }
 }
 
 /**
@@ -66,6 +68,10 @@ object StatusText {
         "Gagal cek isi: {0}" to "Failed content check: {0}",
         "Gagal: perlu login Steam lagi" to "Failed: Steam login needed again",
         "Berhasil diupdate ✓ ({0})" to "Updated ✓ ({0})",
+        "ID Workshop belum pasti: kandidat terbaik {0} hanya {1}% cocok. Cek di Workshop lalu isi manual." to
+            "Workshop ID uncertain: best candidate {0} is only {1}% similar. Check the Workshop and enter it manually.",
+        "ID kemungkinan salah: hanya {0}% file lokal ada di item Workshop ini (versi B41/B42 lain atau modpack?). Tekan FIND ID." to
+            "ID probably wrong: only {0}% of local files exist in this Workshop item (other B41/B42 version or a modpack?). Tap FIND ID.",
         "Gagal: {0}" to "Failed: {0}",
     )
 
