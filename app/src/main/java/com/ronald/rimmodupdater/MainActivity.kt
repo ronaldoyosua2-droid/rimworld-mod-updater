@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(TextView(this).apply {
-            text = "RimWorld Mod Updater"
+            text = "Steamod Updater"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
         })
@@ -266,7 +266,7 @@ class MainActivity : AppCompatActivity() {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Log RimMod Updater ${AppLog.buildLabel}")
+                putExtra(Intent.EXTRA_SUBJECT, "Log Steamod Updater ${AppLog.buildLabel}")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(send, "Kirim log ke…"))
@@ -1050,7 +1050,7 @@ class MainActivity : AppCompatActivity() {
             b.setTitle("Setujui di aplikasi Steam")
                 .setMessage(
                     "1. Buka aplikasi Steam di HP-mu.\n" +
-                        "2. Tekan \"Approve / Setujui\" pada permintaan login \"RimMod Updater\".\n" +
+                        "2. Tekan \"Approve / Setujui\" pada permintaan login \"Steamod Updater\".\n" +
                         "3. Kembali ke sini, lalu tekan tombol \"Sudah disetujui\".\n\n" +
                         "Tidak apa-apa kalau koneksi sempat putus saat kamu pindah aplikasi, nanti otomatis tersambung lagi."
                 )

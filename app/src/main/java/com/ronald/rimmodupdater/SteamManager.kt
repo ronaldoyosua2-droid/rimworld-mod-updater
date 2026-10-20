@@ -232,7 +232,7 @@ object SteamManager {
                 this.username = username
                 this.password = password
                 persistentSession = true
-                deviceFriendlyName = "RimMod Updater (Android)"
+                deviceFriendlyName = "Steamod Updater (Android)"
                 authenticator = null // verifikasi ditangani sendiri di bawah
             }
             val session = withReconnect("Mulai login") {

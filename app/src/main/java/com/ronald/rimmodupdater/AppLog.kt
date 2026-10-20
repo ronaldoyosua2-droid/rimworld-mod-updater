@@ -121,7 +121,7 @@ object AppLog {
     @Synchronized
     fun fullText(): String = buildString {
         flush()
-        append("RimMod Updater log\n")
+        append("Steamod Updater log\n")
         append("$buildLabel\n")
         append("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) • ${Build.MANUFACTURER} ${Build.MODEL}\n")
         append("Diekspor: ${timeFmt.format(Date())}\n")

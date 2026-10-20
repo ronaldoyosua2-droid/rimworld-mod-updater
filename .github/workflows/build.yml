@@ -35,18 +35,18 @@ jobs:
           done
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk RimModUpdater.apk
+        run: cp app/build/outputs/apk/release/app-release.apk SteamodUpdater.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: RimModUpdater
-          path: RimModUpdater.apk
+          name: SteamodUpdater
+          path: SteamodUpdater.apk
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: RimMod Updater (build ${{ github.run_number }})
-          body: Download **RimModUpdater.apk** di bawah, lalu install di HP.
+          name: Steamod Updater (build ${{ github.run_number }})
+          body: Download **SteamodUpdater.apk** di bawah, lalu install di HP.
           make_latest: true
-          files: RimModUpdater.apk
+          files: SteamodUpdater.apk
