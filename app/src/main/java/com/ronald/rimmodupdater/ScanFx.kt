@@ -29,80 +29,25 @@ class ScanReveal(ctx: Context) : FrameLayout(ctx) {
         clipChildren = true
     }
 
-    /** Jalankan efek render. */
+    /** Muncul perlahan (memudar masuk), tanpa garis turun. */
     fun reveal(delayMs: Long = 0, durationMs: Long = 420) {
         animator?.cancel()
-        progress = 0f
-        invalidate()
-        animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            startDelay = delayMs
-            duration = durationMs
-            interpolator = DecelerateInterpolator(1.2f)
-            addUpdateListener {
-                progress = it.animatedValue as Float
-                invalidate()
-            }
-            start()
-        }
-    }
-
-    override fun dispatchDraw(canvas: Canvas) {
-        if (progress >= 1f) {
-            super.dispatchDraw(canvas)
-            return
-        }
-        val y = height * progress
-        canvas.save()
-        canvas.clipRect(0f, 0f, width.toFloat(), y)
-        super.dispatchDraw(canvas)
-        canvas.restore()
-        // cahaya di belakang garis
-        val glowH = 14 * density
-        glowPaint.shader = LinearGradient(0f, y - glowH, 0f, y, 0x0039FF88, 0x5539FF88, Shader.TileMode.CLAMP)
-        canvas.drawRect(0f, y - glowH, width.toFloat(), y, glowPaint)
-        // garis tipis
-        canvas.drawRect(0f, y - 1f * density, width.toFloat(), y + 0.5f * density, linePaint)
+        alpha = 0f
+        animate().alpha(1f).setStartDelay(delayMs).setDuration(durationMs).start()
     }
 }
 
 /**
- * Lapisan di atas seluruh layar: garis-garis halus ala monitor lama + garis sapuan samar
- * yang sesekali turun dari atas ke bawah. Tidak menangkap sentuhan.
+ * Lapisan di atas seluruh layar: garis-garis halus ala monitor lama (diam). Tidak menangkap sentuhan.
  */
 class CrtOverlay(ctx: Context) : View(ctx) {
 
     private val density = ctx.resources.displayMetrics.density
     private val scanPaint = Paint().apply { color = 0x2E000000 }
-    private val sweepPaint = Paint()
-    private var sweepY = -1f
-    private val sweep = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 2600
-        interpolator = LinearInterpolator()
-        repeatCount = ValueAnimator.INFINITE
-        repeatMode = ValueAnimator.RESTART
-        startDelay = 1500
-        addUpdateListener {
-            // jeda di antara sapuan: hanya tampil di 60% awal siklus
-            val f = it.animatedValue as Float
-            sweepY = if (f < 0.6f) (f / 0.6f) * height else -1f
-            invalidate()
-        }
-    }
-
     init {
         isClickable = false
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        sweep.start()
-    }
-
-    override fun onDetachedFromWindow() {
-        sweep.cancel()
-        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -111,11 +56,6 @@ class CrtOverlay(ctx: Context) : View(ctx) {
         while (y < height) {
             canvas.drawRect(0f, y, width.toFloat(), y + density * 0.8f, scanPaint)
             y += step
-        }
-        if (sweepY >= 0) {
-            val h = 70 * density
-            sweepPaint.shader = LinearGradient(0f, sweepY - h, 0f, sweepY, 0x0039FF88, 0x1439FF88, Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, sweepY - h, width.toFloat(), sweepY, sweepPaint)
         }
     }
 }
@@ -144,5 +84,49 @@ object Decrypt {
             })
         }
         anim.start()
+    }
+}
+
+/**
+ * Cahaya tulisan yang berdenyut redup-terang pelan (seperti monitor tabung),
+ * dengan kedip kecil sesekali. Semua tulisan yang "menyala" ikut satu irama.
+ */
+object GlowPulse {
+    private class Entry(val ref: java.lang.ref.WeakReference<android.widget.TextView>, val color: Int, val radius: Float)
+
+    private val items = mutableListOf<Entry>()
+    private var flicker = 0f
+    private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 2200
+        repeatCount = ValueAnimator.INFINITE
+        repeatMode = ValueAnimator.REVERSE
+        interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        addUpdateListener { tick(it.animatedValue as Float) }
+    }
+
+    fun register(tv: android.widget.TextView, color: Int, radius: Float) {
+        items.removeAll { it.ref.get() == null || it.ref.get() === tv }
+        items += Entry(java.lang.ref.WeakReference(tv), color, radius)
+        if (!anim.isStarted) anim.start()
+    }
+
+    private fun tick(v: Float) {
+        // kedip kecil acak, cepat pulih
+        if (flicker <= 0f && Random.nextFloat() < 0.012f) flicker = 1f
+        val dip = if (flicker > 0f) { flicker -= 0.25f; 0.45f } else 0f
+        val level = (0.35f + 0.65f * v - dip).coerceIn(0.1f, 1f)
+        val it = items.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            val tv = e.ref.get()
+            if (tv == null) { it.remove(); continue }
+            if (!tv.isAttachedToWindow) continue
+            val a = (60 + 170 * level).toInt()
+            tv.setShadowLayer(
+                e.radius * (0.4f + 0.9f * level), 0f, 0f,
+                android.graphics.Color.argb(a, android.graphics.Color.red(e.color), android.graphics.Color.green(e.color), android.graphics.Color.blue(e.color)),
+            )
+            tv.alpha = 0.78f + 0.22f * level
+        }
     }
 }

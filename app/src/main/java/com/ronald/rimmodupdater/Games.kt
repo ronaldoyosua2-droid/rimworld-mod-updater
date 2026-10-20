@@ -29,8 +29,10 @@ object Hx {
     val MONO: Typeface = Typeface.MONOSPACE
     val MONO_BOLD: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
 
+    /** Tulisan menyala, ikut berdenyut redup-terang (lihat GlowPulse). */
     fun glow(tv: TextView, color: Int = GREEN, radius: Float = 10f) {
         tv.setShadowLayer(radius, 0f, 0f, Color.argb(150, Color.red(color), Color.green(color), Color.blue(color)))
+        GlowPulse.register(tv, color, radius)
     }
 
     fun states(enabled: Int, disabled: Int) = ColorStateList(

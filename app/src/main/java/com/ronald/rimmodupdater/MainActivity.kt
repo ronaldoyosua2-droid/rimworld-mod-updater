@@ -337,7 +337,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Animasi pembuka: judul "dekripsi", header di-render garis, teks prompt diketik, kursor berkedip. */
     private fun bootAnimation() {
-        headerReveal.reveal(0, 650)
+        headerReveal.reveal(0, 500)
         Decrypt.run(titleView, "STEAMOD_UPDATER", 800)
         val prompt = "build ${BuildConfig.VERSION_CODE} · root@android:~$ "
         var i = 0
