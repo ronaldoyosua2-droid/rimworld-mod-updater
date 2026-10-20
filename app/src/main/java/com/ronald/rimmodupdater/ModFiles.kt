@@ -356,6 +356,16 @@ object ModFiles {
         return CompareResult(remote.size, diff, coverage)
     }
 
+    /**
+     * Struktur mod Project Zomboid B42: file ada di dalam folder versi ("42", "42.13", …) atau "common/".
+     * Mod khusus B41 menaruh mod.info & media/ langsung di akar folder.
+     */
+    fun isB42Layout(paths: Collection<String>): Boolean = paths.any { p ->
+        val first = p.substringBefore('/').lowercase()
+        if (first == p) return@any false
+        first == "common" || (first.length >= 2 && first[0] == '4' && first[1] in '2'..'9' && first.all { it.isDigit() || it == '.' })
+    }
+
     /** Daftar file lokal di folder mod: path (huruf kecil) → ukuran. */
     fun localSizes(ctx: Context, dir: DocumentFile): Map<String, Long> {
         val local = mutableMapOf<String, Pair<Uri, Long>>()

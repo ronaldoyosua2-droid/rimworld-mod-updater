@@ -1036,10 +1036,17 @@ class MainActivity : AppCompatActivity() {
                         val loc = localOf.getOrPut(m) {
                             try { ModFiles.locateFolder(this@MainActivity, m)?.let { ModFiles.localSizes(this@MainActivity, it) } } catch (_: Exception) { null } ?: emptyMap()
                         }
+                        // mod lokal B42 → item yang hanya berisi versi B41 dilewati
+                        val localB42 = ModFiles.isB42Layout(loc.keys)
                         for (cid in cands[m].orEmpty()) {
                             val mf = manifestCache[cid] ?: continue
                             val pre = ModFiles.findModPrefix(mf, m.subPath) ?: continue
-                            val sc = ModFiles.similarity(loc, ModFiles.scope(mf, pre), mf.size)
+                            val scoped = ModFiles.scope(mf, pre)
+                            if (localB42 && !ModFiles.isB42Layout(scoped.map { it.path })) {
+                                panel.log("SKIP", "${m.name} → $cid (B41)")
+                                continue
+                            }
+                            val sc = ModFiles.similarity(loc, scoped, mf.size)
                             if (sc > (best[m]?.third ?: -1.0)) best[m] = Triple(cid, pre, sc)
                         }
                     }
