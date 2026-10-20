@@ -30,8 +30,14 @@ data class ModEntry(
     var remoteSize: Long = 0,
     /** Jumlah file mod di Workshop (dari cek isi). */
     var remoteFileCount: Int = 0,
+    /** Game: "rimworld" / "zomboid". */
+    var game: String = "rimworld",
+    /** Awalan folder mod ini di dalam item Workshop (Zomboid: "mods/<Folder>/", RimWorld: ""). */
+    var contentPrefix: String = "",
 ) {
-    val displayName: String get() = remoteTitle?.takeIf { it.isNotBlank() } ?: name
+    /** Zomboid: satu item Workshop bisa berisi banyak mod, jadi tampilkan nama mod lokal. */
+    val displayName: String
+        get() = if (game == "zomboid") name else remoteTitle?.takeIf { it.isNotBlank() } ?: name
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("workshopId", workshopId)
@@ -49,6 +55,8 @@ data class ModEntry(
         put("remoteVersion", remoteVersion)
         put("remoteSize", remoteSize)
         put("remoteFileCount", remoteFileCount)
+        put("game", game)
+        put("contentPrefix", contentPrefix)
     }
 
     companion object {
@@ -68,6 +76,8 @@ data class ModEntry(
             remoteVersion = o.optString("remoteVersion"),
             remoteSize = o.optLong("remoteSize"),
             remoteFileCount = o.optInt("remoteFileCount"),
+            game = o.optString("game", "rimworld").ifBlank { "rimworld" },
+            contentPrefix = o.optString("contentPrefix"),
         )
     }
 }
@@ -90,6 +100,16 @@ class ModStore(context: Context) {
         list.forEach { arr.put(it.toJson()) }
         prefs.edit().putString("list", arr.toString()).apply()
     }
+
+    var currentGame: String
+        get() = prefs.getString("game", "rimworld") ?: "rimworld"
+        set(v) = prefs.edit().putString("game", v).apply()
+
+    /** Folder hasil per game (mod dari link). */
+    fun outputFor(game: String): String? = prefs.getString("outputTree_$game", null)
+        ?: if (game == "rimworld") prefs.getString("outputTree", null) else null
+
+    fun setOutputFor(game: String, uri: String) = prefs.edit().putString("outputTree_$game", uri).apply()
 
     var outputTreeUri: String?
         get() = prefs.getString("outputTree", null)

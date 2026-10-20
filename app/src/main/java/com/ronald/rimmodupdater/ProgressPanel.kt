@@ -35,14 +35,14 @@ class ProgressPanel(private val ctx: Context) {
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     // --- warna
-    private val cText = Color.parseColor("#F2ECF5")
-    private val cMuted = Color.parseColor("#A8A2AD")
+    private val cText = Color.parseColor("#C9FFE0")
+    private val cMuted = Color.parseColor("#1F9E57")
     private val tGreen = Color.parseColor("#7DFFA8")
     private val tTime = Color.parseColor("#3F7A55")
     private val tTag = Color.parseColor("#B6FFCF")
     private val tOk = Color.parseColor("#3DFF8B")
     private val tErr = Color.parseColor("#FF7A6E")
-    private val okGreen = Color.parseColor("#5FBF8A")
+    private val okGreen = Color.parseColor("#39FF88")
     private val failRed = Color.parseColor("#E0605A")
 
     // --- state (dibaca di main thread saat render)
@@ -57,6 +57,31 @@ class ProgressPanel(private val ctx: Context) {
     private val maxLines = 8
     @Volatile private var dirty = false
     @Volatile private var scheduled = false
+
+    // --- bingkai kartu yang berdenyut selama proses berjalan
+    private val cardBg = GradientDrawable().apply {
+        setColor(Color.parseColor("#06110B"))
+        setStroke((1 * density).toInt(), Color.parseColor("#0F3D24"))
+        cornerRadius = 8 * density
+    }
+    private var pulse: android.animation.ValueAnimator? = null
+
+    private fun startPulse() {
+        pulse?.cancel()
+        pulse = android.animation.ValueAnimator.ofArgb(Color.parseColor("#0F3D24"), Color.parseColor("#39FF88")).apply {
+            duration = 900
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            addUpdateListener { cardBg.setStroke((1 * density).toInt(), it.animatedValue as Int) }
+            start()
+        }
+    }
+
+    private fun stopPulse() {
+        pulse?.cancel()
+        pulse = null
+        cardBg.setStroke((1 * density).toInt(), Color.parseColor("#39FF88"))
+    }
 
     // --- views
     val view: LinearLayout
@@ -77,11 +102,7 @@ class ProgressPanel(private val ctx: Context) {
         view = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(px(14), px(12), px(14), px(12))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1D1B20"))
-                setStroke(px(1), Color.parseColor("#49454F"))
-                cornerRadius = px(14).toFloat()
-            }
+            background = cardBg
             visibility = View.GONE
         }
         captionView = TextView(ctx).apply {
@@ -103,10 +124,10 @@ class ProgressPanel(private val ctx: Context) {
             textSize = 10.5f
             letterSpacing = 0.04f
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#A9B8FF"))
+            setTextColor(Color.parseColor("#39FF88"))
             setPadding(px(8), px(2), px(8), px(2))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#2F3A55"))
+                setColor(Color.parseColor("#0F3D24"))
                 cornerRadius = px(20).toFloat()
             }
         }
@@ -162,8 +183,8 @@ class ProgressPanel(private val ctx: Context) {
             isIndeterminate = true
             trackThickness = px(7)
             trackCornerRadius = px(4)
-            setIndicatorColor(Color.parseColor("#5A9A78"))
-            trackColor = Color.parseColor("#2E2B33")
+            setIndicatorColor(Color.parseColor("#39FF88"))
+            trackColor = Color.parseColor("#0F3D24")
         }
         view.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -197,7 +218,7 @@ class ProgressPanel(private val ctx: Context) {
             typeface = mono
             setTextColor(Color.parseColor("#5C8A6C"))
             setPadding(px(4), 0, 0, 0)
-            text = "steam://depot/${WorkshopApi.RIMWORLD_APP_ID}"
+            text = "steam://depot/${SteamManager.appId}"
         }
         dots.addView(termTitle)
         termText = TextView(ctx).apply {
@@ -252,11 +273,29 @@ class ProgressPanel(private val ctx: Context) {
         stats = emptyList()
         detail = ""
         items = emptyList()
-        main.post { view.visibility = View.VISIBLE }
+        main.post {
+            termTitle.text = "steam://depot/${SteamManager.appId}"
+            if (view.visibility != View.VISIBLE) {
+                view.visibility = View.VISIBLE
+                view.alpha = 0f
+                view.translationY = -12 * density
+                view.animate().alpha(1f).translationY(0f).setDuration(260).start()
+            }
+            startPulse()
+        }
         invalidate()
     }
 
-    fun hide() = main.post { view.visibility = View.GONE }
+    /** Proses selesai: bingkai berhenti berdenyut (tetap terlihat sebentar). */
+    fun finish() = main.post { stopPulse() }
+
+    fun hide() = main.post {
+        stopPulse()
+        view.animate().alpha(0f).setDuration(220).withEndAction {
+            view.visibility = View.GONE
+            view.alpha = 1f
+        }.start()
+    }
 
     fun caption(s: String) { caption = s; invalidate() }
     fun title(s: String) { title = s; invalidate() }

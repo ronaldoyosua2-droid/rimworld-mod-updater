@@ -452,6 +452,85 @@ object ModFiles {
         }
     }
 
+
+    // ---------------------------------------------------------------- Project Zomboid
+
+    private data class Child(val id: String, val name: String, val isDir: Boolean)
+
+    private fun children(ctx: Context, treeUri: Uri, docId: String): List<Child> {
+        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        val cols = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        val out = mutableListOf<Child>()
+        ctx.contentResolver.query(uri, cols, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                val name = c.getString(1) ?: continue
+                out += Child(c.getString(0), name, c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR)
+            }
+        }
+        return out
+    }
+
+    private fun readModInfoName(ctx: Context, treeUri: Uri, docId: String): String? = try {
+        ctx.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(treeUri, docId))
+            ?.bufferedReader()?.use { r ->
+                r.readLines().firstOrNull { it.trim().startsWith("name=", ignoreCase = true) }
+                    ?.substringAfter('=')?.trim()?.takeIf { it.isNotBlank() }
+            }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Cari mod.info di folder mod Zomboid (di akar folder, atau di subfolder versi seperti "42"/"common"). */
+    private fun findModInfo(ctx: Context, treeUri: Uri, dirId: String): String? {
+        val kids = children(ctx, treeUri, dirId)
+        kids.firstOrNull { !it.isDir && it.name.equals("mod.info", true) }?.let { return it.id }
+        kids.filter { it.isDir && (it.name.matches(Regex("""\d+(\.\d+)*""")) || it.name.equals("common", true)) }
+            .forEach { d ->
+                children(ctx, treeUri, d.id).firstOrNull { !it.isDir && it.name.equals("mod.info", true) }?.let { return it.id }
+            }
+        return null
+    }
+
+    /**
+     * Folder yang dipilih bisa berupa folder "mods" (berisi banyak mod) atau satu folder mod.
+     * Nama folder mod dipakai sebagai kunci; ID Workshop dicari terpisah.
+     */
+    fun scanZomboid(ctx: Context, treeUri: Uri, onProgress: (String) -> Unit = {}): List<ScannedMod> {
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        findModInfo(ctx, treeUri, rootId)?.let { info ->
+            val folder = DocumentFile.fromTreeUri(ctx, treeUri)?.name ?: "mod"
+            return listOf(ScannedMod(readModInfoName(ctx, treeUri, info) ?: folder, null, 0, subPath = ""))
+        }
+        val dirs = children(ctx, treeUri, rootId).filter { it.isDir }
+        val out = mutableListOf<ScannedMod>()
+        dirs.forEachIndexed { i, d ->
+            if (i % 10 == 0) onProgress("Membaca folder mod ${i + 1}/${dirs.size}")
+            val info = findModInfo(ctx, treeUri, d.id) ?: return@forEachIndexed
+            out += ScannedMod(readModInfoName(ctx, treeUri, info) ?: d.name, null, 0, subPath = d.name)
+        }
+        return out
+    }
+
+    /** Awalan "…/mods/<folder>/" di daftar file item Workshop, atau null kalau folder itu tidak ada. */
+    fun findModPrefix(remote: List<RemoteFile>, folder: String): String? {
+        val needle = "mods/${folder.lowercase()}/"
+        for (rf in remote) {
+            val p = rf.path.lowercase()
+            val i = p.indexOf(needle)
+            if (i >= 0 && (i == 0 || p[i - 1] == '/')) return rf.path.substring(0, i + needle.length)
+        }
+        return null
+    }
+
+    /** Ambil hanya file di bawah [prefix], dengan path relatif terhadap folder mod. */
+    fun scope(remote: List<RemoteFile>, prefix: String): List<RemoteFile> =
+        if (prefix.isEmpty()) remote
+        else remote.filter { it.path.startsWith(prefix) }.map { it.copy(path = it.path.removePrefix(prefix)) }
+
     fun safeFolderName(name: String, id: String): String {
         val clean = name.replace(Regex("""[\\/:*?"<>|]"""), "").trim().take(60)
         return if (clean.isBlank()) id else clean

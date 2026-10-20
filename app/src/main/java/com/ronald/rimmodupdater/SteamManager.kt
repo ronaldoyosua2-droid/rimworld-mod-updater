@@ -37,6 +37,9 @@ object SteamManager {
 
     class LoginRequired : Exception("Perlu login Steam")
 
+    /** App ID game yang sedang aktif (RimWorld 294100 / Project Zomboid 108600). */
+    @Volatile var appId: Int = Game.RIMWORLD.appId
+
     private var client: SteamClient? = null
     private var manager: CallbackManager? = null
     private var user: SteamUser? = null
@@ -496,7 +499,7 @@ object SteamManager {
             order.forEach { id ->
                 dd.add(
                     PubFileItem(
-                        appId = WorkshopApi.RIMWORLD_APP_ID,
+                        appId = appId,
                         pubFile = id,
                         installToGameNameDirectory = false,
                         installDirectory = dirs[id]!!.absolutePath,
@@ -587,7 +590,7 @@ object SteamManager {
         try {
             dd.add(
                 PubFileItem(
-                    appId = WorkshopApi.RIMWORLD_APP_ID,
+                    appId = appId,
                     pubFile = workshopId,
                     installToGameNameDirectory = false,
                     installDirectory = dir.absolutePath,
