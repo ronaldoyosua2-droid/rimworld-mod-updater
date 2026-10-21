@@ -659,14 +659,14 @@ class MainActivity : AppCompatActivity() {
         })
         val label = if (m.sourceType == "none") "DOWNLOAD" else "UPDATE"
         val bUpdate = button(label, small = true) { updateMods(listOf(m)) }.apply {
-            isEnabled = !busy && m.workshopId.isNotBlank() && (m.updateAvailable || m.sourceType == "none" || m.installedVersion.isEmpty())
+            isEnabled = !busy && m.workshopId.isNotBlank() && !StatusKind.isSuspect(m.status) && (m.updateAvailable || m.sourceType == "none" || m.installedVersion.isEmpty())
         }
         val bForce = button("FORCE", small = true) {
             CmdDialog(this).setTitle(tr("Download ulang?", "Download again?"))
                 .setMessage(tr("Download ulang ${m.displayName} dari Workshop walaupun sudah terbaru?", "Download ${m.displayName} from the Workshop again even though it's up to date?"))
                 .setPositiveButton("Ya") { _, _ -> updateMods(listOf(m)) }
                 .setNegativeButton(tr("Batal", "Cancel"), null).show()
-        }.apply { isEnabled = !busy && m.workshopId.isNotBlank() }
+        }.apply { isEnabled = !busy && m.workshopId.isNotBlank() && !StatusKind.isSuspect(m.status) }
         val needSearch = m.game == Game.ZOMBOID.key && m.sourceType == "folder" && (m.workshopId.isBlank() || StatusKind.isSuspect(m.status))
         val bId = button(if (needSearch) "FIND ID" else "EDIT ID", small = true) {
             if (needSearch) {
