@@ -22,7 +22,9 @@ class HudBox(ctx: Context, private val tagTop: String, private val tagBottom: St
 
     /** Jarak label di atas & bawah kotak. */
     private val topSpace = dp(13f)
-    private val bottomSpace = if (tagBottom != null) dp(13f) else dp(2f)
+    private val bottomSpace = if (tagBottom != null) dp(13f) else dp(7f)
+    /** Jarak kiri-kanan supaya siku & cahayanya tidak terpotong tepi view. */
+    private val side = dp(7f)
 
     private val amber = Hx.AMBER
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.SQUARE }
@@ -37,13 +39,13 @@ class HudBox(ctx: Context, private val tagTop: String, private val tagBottom: St
 
     init {
         setWillNotDraw(false)
-        setPadding(dp(12f).toInt(), (topSpace + dp(7f)).toInt(), dp(22f).toInt(), (bottomSpace + dp(7f)).toInt())
+        setPadding((side + dp(11f)).toInt(), (topSpace + dp(7f)).toInt(), (side + dp(20f)).toInt(), (bottomSpace + dp(7f)).toInt())
+        clipChildren = false
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
-        val inset = dp(1.5f)
-        box.set(inset, topSpace, w - inset, h - bottomSpace)
+        box.set(side, topSpace, w - side, h - bottomSpace)
         val c = dp(12f)
         corners.reset()
         corners.moveTo(box.left, box.top + c); corners.lineTo(box.left, box.top); corners.lineTo(box.left + c, box.top)

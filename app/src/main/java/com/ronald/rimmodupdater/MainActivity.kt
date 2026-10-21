@@ -692,7 +692,7 @@ class MainActivity : AppCompatActivity() {
                 hl("last_update: ", "never", tr(" (belum pernah diupdate lewat app)", " (not updated by the app yet)"))
             box.addView(HudBox(this, "UPD_LOG").apply { addView(term(lu, 10.5f, Hx.DIM)) },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = px(4); leftMargin = -px(4); rightMargin = -px(4)
+                    topMargin = px(2)
                 })
         }
         box.addView(term(statusText, 11.5f, accent, bold = true).apply {
