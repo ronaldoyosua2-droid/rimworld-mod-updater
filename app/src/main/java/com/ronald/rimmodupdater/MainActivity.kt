@@ -690,7 +690,14 @@ class MainActivity : AppCompatActivity() {
                 hl("last_update: ", fmtMs(m.lastUpdated), " (${m.lastUpdatedFiles} files)")
             else
                 hl("last_update: ", "never", tr(" (belum pernah diupdate lewat app)", " (not updated by the app yet)"))
-            box.addView(HudBox(this, "UPD_LOG").apply { addView(term(lu, 10.5f, Hx.DIM)) },
+            // warna & kecepatan cahaya ikut status: merah cepat ⚠, kuning normal, hijau lambat
+            val hudMode = when {
+                StatusKind.isFailed(m.status) -> HudBox.Mode.DANGER
+                m.updateAvailable -> HudBox.Mode.UPDATE
+                StatusKind.isOk(m.status) -> HudBox.Mode.OK
+                else -> HudBox.Mode.INFO
+            }
+            box.addView(HudBox(this, "UPD_LOG", mode = hudMode).apply { addView(term(lu, 10.5f, Hx.DIM)) },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = px(2)
                 })

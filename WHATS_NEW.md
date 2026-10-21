@@ -1,2 +1,4 @@
-- 🛠️ **HUD box fix:** the yellow corner brackets on the `UPD_LOG` box inside each mod card and their glow are no longer cut off.
-- 📐 Spacing of the `SYS_LOG` and `UPD_LOG` boxes tidied up so the pulsing glow is fully visible.
+- 🟢 **Status-colored glow:** the `UPD_LOG` box on every mod card now glows in the color of its status.
+  - **Up to date:** green, with a slow, calm pulse.
+  - **Update available:** amber, normal pulse.
+  - **Failed / wrong ID / error:** red, with a faster pulse and a blinking ⚠ danger triangle instead of the round light.
