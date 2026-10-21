@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var manifestCacheTime = 0L
 
     private lateinit var steamStatus: TextView
+    private lateinit var summaryText: TextView
     private lateinit var steamButton: MaterialButton
     private lateinit var panel: ProgressPanel
     private lateinit var listContainer: LinearLayout
@@ -259,6 +260,12 @@ class MainActivity : AppCompatActivity() {
                     topMargin = px(12)
                 })
                 addView(steamRow)
+                addView(HudBox(this@MainActivity, "SYS_LOG · 01", "X_300:1").apply {
+                    summaryText = term("", 11.5f, Hx.DIM).apply { setLineSpacing(px(3).toFloat(), 1f) }
+                    addView(summaryText)
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = px(6)
+                })
                 addView(row(bFolder, bZip, bLink))
                 addView(row(bCheck, bAll, bLog))
             })
@@ -548,6 +555,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun fmt(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t * 1000))
 
+    private fun fmtMs(t: Long) = if (t <= 0) "-" else dateFmt.format(Date(t))
+
+    /** Teks "label nilai ekor" dengan nilai disorot terang. */
+    private fun hl(label: String, value: String, tail: String = ""): CharSequence {
+        val sb = android.text.SpannableStringBuilder(label)
+        val st = sb.length
+        sb.append(value)
+        sb.setSpan(android.text.style.ForegroundColorSpan(Hx.BRIGHT), st, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sb.append(tail)
+        return sb
+    }
+
+    /** Ringkasan last_scan / last_update untuk game yang dipilih. */
+    private fun renderSummary() {
+        if (!::summaryText.isInitialized) return
+        val (scanT, scanN) = store.lastScan(game.key)
+        val (updT, updN) = store.lastUpdate(game.key)
+        val sb = android.text.SpannableStringBuilder()
+        sb.append(hl("> last_scan  : ", if (scanT > 0) fmtMs(scanT) else "never", if (scanT > 0) " · $scanN mods" else ""))
+        sb.append("\n")
+        sb.append(hl("> last_update: ", if (updT > 0) fmtMs(updT) else "never", if (updT > 0) " · $updN mods" else ""))
+        summaryText.text = sb
+    }
+
     private var lastRender = 0L
     private var renderPending = false
 
@@ -564,6 +595,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doRenderList() {
+        renderSummary()
         lastRender = android.os.SystemClock.uptimeMillis()
         listContainer.removeAllViews()
         // urutan: merah (gagal / ID belum ketemu) → kuning (ada update) → lainnya
@@ -652,6 +684,16 @@ class MainActivity : AppCompatActivity() {
             StatusKind.isOk(m.status) -> "✓ " + StatusText.localize(m.status)
             StatusKind.isFailed(m.status) -> "✗ " + StatusText.localize(m.status)
             else -> "> " + StatusText.localize(m.status)
+        }
+        if (m.sourceType != "none" || m.lastUpdated > 0) {
+            val lu = if (m.lastUpdated > 0)
+                hl("last_update: ", fmtMs(m.lastUpdated), " (${m.lastUpdatedFiles} files)")
+            else
+                hl("last_update: ", "never", tr(" (belum pernah diupdate lewat app)", " (not updated by the app yet)"))
+            box.addView(HudBox(this, "UPD_LOG").apply { addView(term(lu, 10.5f, Hx.DIM)) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = px(4); leftMargin = -px(4); rightMargin = -px(4)
+                })
         }
         box.addView(term(statusText, 11.5f, accent, bold = true).apply {
             setPadding(0, px(6), 0, px(6))
@@ -1376,6 +1418,8 @@ class MainActivity : AppCompatActivity() {
                 store.save(mods)
                 renderList()
                 val updates = targets.count { it.updateAvailable && it in mods }
+                store.setLastScan(game.key, targets.size)
+                renderSummary()
                 panel.caption(tr("CEK UPDATE · SELESAI", "CHECK UPDATES · DONE"))
                 panel.title(if (updates == 0) tr("Semua terbaru", "All up to date") else tr("$updates mod perlu update", "$updates mods need updating"))
                 panel.badge(tr("SELESAI", "DONE"))
@@ -1497,6 +1541,8 @@ class MainActivity : AppCompatActivity() {
                 store.save(mods)
                 runOnUiThread { renderList() }
             }
+            if (ok > 0) store.setLastUpdate(game.key, ok)
+            renderSummary()
             panel.caption(tr("UPDATE MOD · SELESAI", "UPDATE · DONE"))
             panel.title(tr("$ok dari ${list.size} berhasil", "$ok of ${list.size} succeeded"))
             panel.badge(tr("SELESAI", "DONE"))
@@ -1629,6 +1675,7 @@ class MainActivity : AppCompatActivity() {
             )
             panel.badge(tr("MENYALIN", "COPYING"))
             val copyTotal = ModFiles.downloadedFiles(work).size
+            m.lastUpdatedFiles = copyTotal
             val copyFrac: (Float) -> Unit = { f ->
                 onFraction(0.8f + f * 0.2f)
                 panel.stats(
@@ -1674,6 +1721,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)
+            m.lastUpdated = System.currentTimeMillis()
             m.updateAvailable = false
             m.installedVersion = m.remoteVersion
             AppLog.i("Berhasil update ${m.workshopId} (${m.displayName})")

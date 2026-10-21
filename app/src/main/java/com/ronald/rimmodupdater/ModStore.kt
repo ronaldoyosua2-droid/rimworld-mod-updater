@@ -38,6 +38,9 @@ data class ModEntry(
     var modId: String = "",
     /** Isi lokal sudah pernah dicocokkan dengan item Workshop ini (cek ID salah). */
     var coverageChecked: Boolean = false,
+    /** Kapan mod ini terakhir diupdate lewat aplikasi (ms epoch, 0 = belum pernah) & jumlah file yang disalin. */
+    var lastUpdated: Long = 0,
+    var lastUpdatedFiles: Int = 0,
 ) {
     /** Zomboid: satu item Workshop bisa berisi banyak mod, jadi tampilkan nama mod lokal. */
     val displayName: String
@@ -63,6 +66,8 @@ data class ModEntry(
         put("contentPrefix", contentPrefix)
         put("modId", modId)
         put("coverageChecked", coverageChecked)
+        put("lastUpdated", lastUpdated)
+        put("lastUpdatedFiles", lastUpdatedFiles)
     }
 
     companion object {
@@ -86,6 +91,8 @@ data class ModEntry(
             contentPrefix = o.optString("contentPrefix"),
             modId = o.optString("modId"),
             coverageChecked = o.optBoolean("coverageChecked"),
+            lastUpdated = o.optLong("lastUpdated"),
+            lastUpdatedFiles = o.optInt("lastUpdatedFiles"),
         )
     }
 }
@@ -118,6 +125,12 @@ class ModStore(context: Context) {
         ?: if (game == "rimworld") prefs.getString("outputTree", null) else null
 
     fun setOutputFor(game: String, uri: String) = prefs.edit().putString("outputTree_$game", uri).apply()
+
+    /** Ringkasan per game: (waktu ms, jumlah mod). */
+    fun lastScan(game: String): Pair<Long, Int> = prefs.getLong("lastScan_$game", 0) to prefs.getInt("lastScanN_$game", 0)
+    fun setLastScan(game: String, n: Int) = prefs.edit().putLong("lastScan_$game", System.currentTimeMillis()).putInt("lastScanN_$game", n).apply()
+    fun lastUpdate(game: String): Pair<Long, Int> = prefs.getLong("lastUpd_$game", 0) to prefs.getInt("lastUpdN_$game", 0)
+    fun setLastUpdate(game: String, n: Int) = prefs.edit().putLong("lastUpd_$game", System.currentTimeMillis()).putInt("lastUpdN_$game", n).apply()
 
     var outputTreeUri: String?
         get() = prefs.getString("outputTree", null)
