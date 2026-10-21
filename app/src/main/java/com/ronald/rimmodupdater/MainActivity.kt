@@ -1001,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
             setBusy(true, tr("Membaca folder…", "Reading folder…"))
             if (game == Game.ZOMBOID) {
                 addZomboidFolder(uri)
-                return@launch
+                return@job
             }
             try {
                 val found = withContext(Dispatchers.IO) { ModFiles.scanTree(this@MainActivity, uri) }
@@ -1097,7 +1097,7 @@ class MainActivity : AppCompatActivity() {
                 list.forEach { it.status = tr("ID belum dicari. Login Steam lalu tekan CARI ID.", "ID not searched yet. Log in to Steam, then tap FIND ID.") }
                 store.save(mods)
                 setBusy(false)
-                return@launch
+                return@job
             }
             refreshSteamStatus()
             // 1) cari kandidat lewat pencarian Workshop
@@ -1238,7 +1238,7 @@ class MainActivity : AppCompatActivity() {
         job {
             if (game == Game.ZOMBOID) {
                 toast(tr("File zip belum didukung untuk Project Zomboid. Pakai [+] FOLDER.", "Zip files aren't supported for Project Zomboid yet. Use [+] FOLDER."))
-                return@launch
+                return@job
             }
             setBusy(true, tr("Membaca zip…", "Reading zip…"))
             var added = 0
@@ -1598,7 +1598,7 @@ class MainActivity : AppCompatActivity() {
             panel.start(tr("UPDATE MOD · ${list.size} MOD", "UPDATE · ${list.size} MODS"), tr("Menghubungkan ke Steam…", "Connecting to Steam…"), "LOGIN")
             if (!ensureSteam()) {
                 setBusy(false)
-                return@launch
+                return@job
             }
             refreshSteamStatus()
             var ok = 0
