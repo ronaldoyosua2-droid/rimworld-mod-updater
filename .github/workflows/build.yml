@@ -42,11 +42,24 @@ jobs:
           name: SteamodUpdater
           path: SteamodUpdater.apk
 
+      - name: Release notes
+        run: |
+          {
+            cat .github/release/INTRO.md
+            echo
+            echo "## ✨ What's new · build ${{ github.run_number }}"
+            echo
+            cat WHATS_NEW.md
+            echo
+            echo "---"
+            echo "📥 **Cara install:** download **SteamodUpdater.apk** di bawah, lalu install di HP. Bisa langsung ditimpa di atas versi lama, data mod & login tetap tersimpan."
+          } > release_notes.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Steamod Updater (build ${{ github.run_number }})
-          body: Download **SteamodUpdater.apk** di bawah, lalu install di HP.
+          body_path: release_notes.md
           make_latest: true
           files: SteamodUpdater.apk

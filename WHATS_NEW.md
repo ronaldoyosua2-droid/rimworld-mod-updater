@@ -1,0 +1,4 @@
+- 🕒 **last_scan / last_update:** kotak ringkasan di bawah `steam_session` menampilkan kapan terakhir SCAN UPDATE dan kapan terakhir ada mod yang di-update (per game).
+- 🗂️ **last_update per mod:** tiap kartu mod menampilkan kapan mod itu terakhir di-update lewat aplikasi dan berapa file yang diganti, atau `never`.
+- ✨ **Kotak HUD bercahaya:** siku kuning, label `SYS_LOG` / `UPD_LOG`, garis ukur, dan lampu indikator yang berdenyut menyala-redup.
+- 📝 Deskripsi rilis GitHub sekarang berisi perkenalan aplikasi dan daftar perubahan seperti ini.
