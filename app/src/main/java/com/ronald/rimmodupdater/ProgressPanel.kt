@@ -50,6 +50,13 @@ class ProgressPanel(private val ctx: Context) {
     @Volatile private var title = ""
     @Volatile private var badge = ""
     @Volatile private var fraction: Float? = null
+
+    /** Ringkasan proses yang sedang berjalan (untuk kotak "job" di menu ☰). */
+    val jobSummary: String
+        get() {
+            val pct = fraction?.let { " ${(it * 100).toInt()}%" } ?: ""
+            return listOf(caption, "$title · $badge$pct").filter { it.isNotBlank() && it != " · " }.joinToString("\n> ")
+        }
     @Volatile private var stats: List<Pair<String, String>> = emptyList()
     @Volatile private var detail = ""
     @Volatile private var items: List<Pair<String, ItemState>> = emptyList()
@@ -398,6 +405,16 @@ class ProgressPanel(private val ctx: Context) {
     }
 
     private fun render() {
+        // ringkasan untuk notifikasi layanan latar
+        JobState.title = listOf(caption, title).filter { it.isNotBlank() }.joinToString(" · ")
+        JobState.text = buildString {
+            val f = fraction
+            append(badge)
+            if (f != null) append(" · ${(f * 100).toInt()}%")
+            stats.takeIf { it.isNotEmpty() }?.let { append("\n" + it.joinToString(" · ") { (v, l) -> "$v $l" }) }
+            if (detail.isNotBlank()) append("\n" + detail)
+        }.trim()
+        JobState.fraction = fraction
         captionView.text = caption
         captionView.visibility = if (caption.isBlank()) View.GONE else View.VISIBLE
         titleView.text = title

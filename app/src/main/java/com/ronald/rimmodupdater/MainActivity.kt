@@ -27,6 +27,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -56,6 +58,61 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var steamStatus: TextView
     private lateinit var summaryText: TextView
+    private lateinit var drawerOutput: TextView
+    /** Proses panjang yang sedang berjalan (bisa dibatalkan dari notifikasi). */
+    private var currentJob: Job? = null
+    private var askedNotif = false
+
+    private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /** Jalankan proses panjang; kalau dibatalkan, tampilan kembali normal. */
+    private fun job(block: suspend CoroutineScope.() -> Unit): Job =
+        lifecycleScope.launch(block = block).also { j ->
+            currentJob = j
+            j.invokeOnCompletion { e ->
+                if (e is kotlinx.coroutines.CancellationException && busy) runOnUiThread {
+                    panel.log("CANCEL", tr("dibatalkan", "cancelled"), error = true)
+                    AppLog.i("Proses dibatalkan")
+                    setBusy(false)
+                    store.save(mods)
+                }
+            }
+        }
+
+    /** Mulai layanan latar + minta izin notifikasi / pengecualian baterai (sekali). */
+    private fun startBackground() {
+        JobState.onCancel = { runOnUiThread { currentJob?.cancel() } }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !askedNotif &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            askedNotif = true
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        JobService.start(this)
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName) && !prefs.getBoolean("batteryAsked", false)) {
+            prefs.edit().putBoolean("batteryAsked", true).apply()
+            CmdDialog(this)
+                .setTitle(tr("Biar proses tidak terputus", "Keep tasks running"))
+                .setMessage(tr(
+                    "Supaya update tetap jalan saat kamu pindah aplikasi, izinkan Steamod Updater berjalan tanpa batasan baterai.\nDi Xiaomi: Penghemat baterai → Tanpa batasan.",
+                    "So updates keep running when you switch apps, allow Steamod Updater to run without battery restrictions.\nOn Xiaomi: Battery saver → No restrictions."))
+                .setPositiveButton(tr("Buka setelan", "Open settings")) { _, _ ->
+                    try {
+                        startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+                    } catch (_: Exception) {
+                        try {
+                            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+                .setNegativeButton(tr("Nanti", "Later"), null)
+                .show()
+        }
+    }
+    private lateinit var drawerSettings: TextView
     private lateinit var steamButton: MaterialButton
     private lateinit var panel: ProgressPanel
     private lateinit var listContainer: LinearLayout
@@ -203,7 +260,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Hx.GREEN)
             Hx.glow(this, pulse = true)
             background = boxBg(0x1039FF88, Hx.DIM)
-            setOnClickListener { if (!busy) drawer.openDrawer(Gravity.START) }
+            setOnClickListener { drawer.openDrawer(Gravity.START) }
         }
         titleView = term("STEAMOD_UPDATER", 19f, Hx.GREEN, bold = true).apply {
             letterSpacing = 0.06f
@@ -231,7 +288,7 @@ class MainActivity : AppCompatActivity() {
             addView(term("> target_game:", 12f, Hx.GREEN), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(targetLabel)
             addView(term("  ▾", 12f, Hx.GREEN))
-            setOnClickListener { if (!busy) drawer.openDrawer(Gravity.START) }
+            setOnClickListener { drawer.openDrawer(Gravity.START) }
         }
 
         steamStatus = term("", 11.5f, Hx.DIM)
@@ -298,14 +355,22 @@ class MainActivity : AppCompatActivity() {
             })
             addView(gameList)
             addView(View(this@MainActivity), LinearLayout.LayoutParams(1, 0, 1f))
-            addView(term("> set output_dir", 11f, Hx.GREEN).apply {
+            drawerOutput = term("> set output_dir", 11f, Hx.GREEN).apply {
                 setPadding(0, px(10), 0, px(10))
-                setOnClickListener { drawer.closeDrawers(); afterOutputPicked = null; pickOutput.launch(null) }
-            })
-            addView(term("> settings · ${if (Lang.en) "EN" else "ID"}", 11f, Hx.GREEN).apply {
+                setOnClickListener {
+                    if (busy) { toast(tr("Tunggu proses selesai dulu", "Wait for the current task to finish")); return@setOnClickListener }
+                    drawer.closeDrawers(); afterOutputPicked = null; pickOutput.launch(null)
+                }
+            }
+            addView(drawerOutput)
+            drawerSettings = term("> settings · ${if (Lang.en) "EN" else "ID"}", 11f, Hx.GREEN).apply {
                 setPadding(0, px(6), 0, px(10))
-                setOnClickListener { drawer.closeDrawers(); showSettings() }
-            })
+                setOnClickListener {
+                    if (busy) { toast(tr("Tunggu proses selesai dulu", "Wait for the current task to finish")); return@setOnClickListener }
+                    drawer.closeDrawers(); showSettings()
+                }
+            }
+            addView(drawerSettings)
             addView(term("> view log", 11f, Hx.GREEN).apply {
                 setPadding(0, px(6), 0, px(14))
                 setOnClickListener { drawer.closeDrawers(); showLogDialog() }
@@ -398,7 +463,11 @@ class MainActivity : AppCompatActivity() {
                     addView(term(g.title, 13.5f, Hx.BRIGHT, bold = true))
                     addView(term("app ${g.appId} · $count mods", 10.5f, Hx.DIM))
                 })
-                setOnClickListener { switchGame(g) }
+                setOnClickListener {
+                    if (busy && g != game) toast(tr("Tunggu proses selesai untuk ganti game", "Wait for the task to finish before switching games"))
+                    else switchGame(g)
+                }
+                if (busy) alpha = if (on) 0.6f else 0.35f
             }
             val wrap = ScanReveal(this).apply { addView(item) }
             gameList.addView(wrap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -406,6 +475,19 @@ class MainActivity : AppCompatActivity() {
             })
             if (animate) wrap.revealLine(120L + idx * 120L, 380)
         }
+        if (busy) {
+            // proses berjalan: tampilkan pekerjaannya, kunci yang berbahaya (ganti game / folder / bahasa)
+            gameList.addView(term(tr("⏳ tunggu proses selesai untuk ganti game", "⏳ wait for the task to finish to switch games"), 9.5f, Hx.AMBER).apply {
+                setPadding(0, 0, 0, px(8))
+            })
+            gameList.addView(term("> job: " + panel.jobSummary, 10.5f, Hx.GREEN).apply {
+                setPadding(px(10), px(8), px(10), px(8))
+                background = boxBg(0x0F39FF88, Hx.GREEN)
+                setLineSpacing(px(2).toFloat(), 1f)
+            })
+        }
+        drawerOutput.alpha = if (busy) 0.35f else 1f
+        drawerSettings.alpha = if (busy) 0.35f else 1f
         val acc = SteamManager.accountName ?: SteamManager.savedAccount(this)
         drawerFooter.text = "> steam: ${acc ?: "-"} ${if (SteamManager.loggedIn) "● online" else "○ offline"}\n> ${AppLog.buildLabel}"
     }
@@ -430,16 +512,17 @@ class MainActivity : AppCompatActivity() {
         busy = b
         actionButtons.forEach { it.isEnabled = !b }
         steamButton.isEnabled = !b
-        drawer.setDrawerLockMode(
-            if (b) androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED
-            else androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_UNLOCKED
-        )
         if (b) {
             panel.start("", msg ?: tr("Memproses…", "Working…"), "")
             AppLog.tap = { level, line -> terminalFromLog(level, line) }
+            startBackground()
         } else {
             AppLog.tap = null
             panel.finish()
+            // notifikasi ringkasan hanya kalau pengguna sedang di aplikasi lain
+            val away = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+            JobService.stop(this, if (away) "✓ " + JobState.title else null, JobState.text.lineSequence().drop(1).firstOrNull())
+            JobState.onCancel = null
             // biarkan hasil akhir terlihat sebentar
             panel.view.postDelayed({ if (!busy) panel.hide() }, 2500)
         }
@@ -833,7 +916,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun deleteModFiles(m: ModEntry) {
         if (busy) return
-        lifecycleScope.launch {
+        job {
             setBusy(true, tr("Hapus mod", "Delete mod"))
             panel.start("DELETE · ${game.title.uppercase()}", m.displayName, "DELETE")
             try {
@@ -914,7 +997,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addFromFolder(uri: Uri) {
         persist(uri)
-        lifecycleScope.launch {
+        job {
             setBusy(true, tr("Membaca folder…", "Reading folder…"))
             if (game == Game.ZOMBOID) {
                 addZomboidFolder(uri)
@@ -1006,7 +1089,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun discoverZomboidIds(list: List<ModEntry>) {
         if (busy || list.isEmpty()) return
-        lifecycleScope.launch {
+        job {
             setBusy(true, tr("Cari ID Workshop", "Find Workshop ID"))
             val t0 = System.currentTimeMillis()
             panel.start(tr("CARI ID WORKSHOP · ${list.size} MOD", "FIND WORKSHOP ID · ${list.size} MODS"), "Steam Workshop", "SEARCH")
@@ -1152,7 +1235,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addFromZips(uris: List<Uri>) {
         uris.forEach { persist(it) }
-        lifecycleScope.launch {
+        job {
             if (game == Game.ZOMBOID) {
                 toast(tr("File zip belum didukung untuk Project Zomboid. Pakai [+] FOLDER.", "Zip files aren't supported for Project Zomboid yet. Use [+] FOLDER."))
                 return@launch
@@ -1259,7 +1342,7 @@ class MainActivity : AppCompatActivity() {
             toast(tr("Belum ada mod dengan ID Workshop", "No mods with a Workshop ID yet"))
             return
         }
-        lifecycleScope.launch {
+        job {
             setBusy(true, "Steam Workshop")
             val t0 = System.currentTimeMillis()
             panel.start(tr("CEK UPDATE · ${targets.size} MOD", "CHECK UPDATES · ${targets.size} MODS"), "Steam Workshop", tr("CEK VERSI", "VERSIONS"))
@@ -1510,7 +1593,7 @@ class MainActivity : AppCompatActivity() {
                 .show()
             return
         }
-        lifecycleScope.launch {
+        job {
             setBusy(true, tr("Menghubungkan ke Steam…", "Connecting to Steam…"))
             panel.start(tr("UPDATE MOD · ${list.size} MOD", "UPDATE · ${list.size} MODS"), tr("Menghubungkan ke Steam…", "Connecting to Steam…"), "LOGIN")
             if (!ensureSteam()) {
@@ -1530,7 +1613,7 @@ class MainActivity : AppCompatActivity() {
                 panel.badge("DOWNLOAD")
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
-                    updateOne(m, { progress(it) }) { f -> setFraction((i + f) / list.size) }
+                    updateOne(m, { progress(it) }) { f -> setFraction(f) }
                     ok++
                     states[i] = m.displayName to ProgressPanel.ItemState.DONE
                     panel.log("DONE", m.displayName, "✓")
@@ -1626,7 +1709,7 @@ class MainActivity : AppCompatActivity() {
             }
             panel.badge("DOWNLOAD")
             onProgress(tr("Download dari Steam…", "Downloading from Steam…"))
-            // Download = 0..80%, salin ke folder = 80..100%
+            // Persen per tahap: DOWNLOAD 0..100%, lalu COPYING 0..100% (sesuai jumlah file tersalin)
             val t0 = System.currentTimeMillis()
             val bytes = java.util.concurrent.atomic.AtomicLong(0)
             val files = java.util.concurrent.atomic.AtomicInteger(0)
@@ -1661,7 +1744,7 @@ class MainActivity : AppCompatActivity() {
                 onlyFiles = plan?.changed?.map { m.contentPrefix + it.path }?.toSet(),
                 onStatus = {},
                 onFraction = { f ->
-                    onFraction(f * 0.8f)
+                    onFraction(f)
                     // Ukuran terunduh dihitung dari persentase (info byte per chunk tidak selalu dikirim library).
                     if (size > 0) bytes.accumulateAndGet((f.coerceIn(0f, 1f) * size).toLong()) { x, y -> maxOf(x, y) }
                     dlStats()
@@ -1680,17 +1763,33 @@ class MainActivity : AppCompatActivity() {
                     dlStats()
                 },
             )
+            val dlSecs = (System.currentTimeMillis() - t0) / 1000
             panel.badge(tr("MENYALIN", "COPYING"))
+            onFraction(0f)
             val copyTotal = ModFiles.downloadedFiles(work).size
             m.lastUpdatedFiles = copyTotal
-            val copyFrac: (Float) -> Unit = { f ->
-                onFraction(0.8f + f * 0.2f)
+            val c0 = System.currentTimeMillis()
+            val cSamples = ArrayDeque<Pair<Long, Long>>()
+            // progres salin: file tersalin, kecepatan (4 dtk terakhir), sisa waktu, lama berjalan
+            val copyCb: CopyProgress = { done, total, b, totalB ->
+                onFraction(if (total > 0) done.toFloat() / total else 1f)
+                val now = System.currentTimeMillis()
+                val speed: Double
+                synchronized(cSamples) {
+                    cSamples.addLast(now to b)
+                    while (cSamples.size > 2 && now - cSamples.first().first > 4000) cSamples.removeFirst()
+                    val (t1, b1) = cSamples.first()
+                    speed = if (now - t1 >= 300) (b - b1) * 1000.0 / (now - t1) else 0.0
+                }
+                val left = if (totalB > 0 && speed > 0) ((totalB - b).coerceAtLeast(0) / speed).toLong() else -1
                 panel.stats(
-                    "${(f * copyTotal).toInt()}/$copyTotal" to tr("file disalin", "files copied"),
-                    fmtSize(bytes.get().coerceAtLeast(size)) to tr("ukuran", "size"),
-                    fmtDur((System.currentTimeMillis() - t0) / 1000) to tr("berjalan", "elapsed"),
+                    "$done/$total" to tr("file disalin", "files copied"),
+                    "${fmtSize(speed.toLong())}/s" to tr("kecepatan", "speed"),
+                    (if (left >= 0) "~${fmtDur(left)}" else "-") to tr("sisa", "left"),
+                    fmtDur((now - c0) / 1000) to tr("berjalan", "elapsed"),
                 )
             }
+            val copyFrac: (Float) -> Unit = { f -> copyCb((f * copyTotal).toInt(), copyTotal, 0, 0) }
             // Zomboid: isi folder mod ada di dalam "mods/<folder>/" pada item Workshop
             val src = if (m.contentPrefix.isNotEmpty()) File(work, m.contentPrefix) else work
             if (!partial && m.game == Game.RIMWORLD.key) ModFiles.ensurePublishedId(work, m.workshopId)
@@ -1700,10 +1799,10 @@ class MainActivity : AppCompatActivity() {
                     val dir = target!!
                     if (partial && plan != null) {
                         // hanya tulis file yang berubah + hapus file usang
-                        ModFiles.applyChanges(this@MainActivity, dir, src, plan, copyLog(onProgress), copyFrac)
+                        ModFiles.applyChanges(this@MainActivity, dir, src, plan, copyLog(onProgress), copyCb)
                     } else {
                         if (!src.isDirectory) throw Exception(tr("Folder mod tidak ada di hasil download (${m.contentPrefix})", "Mod folder missing from the download (${m.contentPrefix})"))
-                        ModFiles.replaceFolder(this@MainActivity, dir, src, copyLog(onProgress), copyFrac)
+                        ModFiles.replaceFolder(this@MainActivity, dir, src, copyLog(onProgress), copyCb)
                     }
                 }
                 "zip" -> {
@@ -1716,17 +1815,28 @@ class MainActivity : AppCompatActivity() {
                     if (m.game == Game.ZOMBOID.key && zMods != null) {
                         // Zomboid: setiap folder di dalam "mods/" dipasang sebagai folder mod tersendiri
                         val subs = zMods.listFiles()?.filter { it.isDirectory }.orEmpty()
-                        subs.forEachIndexed { i, d ->
-                            ModFiles.writeNewFolder(this@MainActivity, out, d.name, d, copyLog(onProgress)) { f ->
-                                copyFrac((i + f) / subs.size.coerceAtLeast(1))
+                        val allBytes = subs.sumOf { d -> ModFiles.downloadedFiles(d).sumOf { it.length() } }
+                        var filesBefore = 0
+                        var bytesBefore = 0L
+                        subs.forEach { d ->
+                            val fb = filesBefore
+                            val bb = bytesBefore
+                            ModFiles.writeNewFolder(this@MainActivity, out, d.name, d, copyLog(onProgress)) { done, _, b, _ ->
+                                copyCb(fb + done, copyTotal, bb + b, allBytes)
                             }
+                            val sub = ModFiles.downloadedFiles(d)
+                            filesBefore += sub.size
+                            bytesBefore += sub.sumOf { it.length() }
                         }
                     } else {
                         val folderName = ModFiles.safeFolderName(m.displayName, m.workshopId)
-                        ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, copyLog(onProgress), copyFrac)
+                        ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, copyLog(onProgress), copyCb)
                     }
                 }
             }
+            val cpSecs = (System.currentTimeMillis() - c0) / 1000
+            panel.log("TIME", "download ${fmtDur(dlSecs)} · copy ${fmtDur(cpSecs)}", "✓")
+            AppLog.i("Waktu update ${m.workshopId}: download ${dlSecs} dtk, salin ${cpSecs} dtk ($copyTotal file)")
             m.localTime = maxOf(System.currentTimeMillis() / 1000, m.remoteTime)
             m.lastUpdated = System.currentTimeMillis()
             m.updateAvailable = false
@@ -1763,7 +1873,7 @@ class MainActivity : AppCompatActivity() {
             refreshSteamStatus()
             toast(tr("Sudah logout", "Logged out"))
         } else {
-            lifecycleScope.launch {
+            job {
                 setBusy(true, tr("Login Steam…", "Steam login…"))
                 ensureSteam()
                 setBusy(false)

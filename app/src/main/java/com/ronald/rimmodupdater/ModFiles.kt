@@ -11,6 +11,9 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
+/** Progres salin: (file selesai, total file, byte tersalin, total byte). */
+typealias CopyProgress = (Int, Int, Long, Long) -> Unit
+
 /** Membaca mod lama (folder / zip) dan memasang hasil download ke tempatnya. */
 object ModFiles {
 
@@ -178,11 +181,11 @@ object ModFiles {
         target: DocumentFile,
         src: File,
         onProgress: (String) -> Unit,
-        onFraction: (Float) -> Unit = {},
+        onCopy: CopyProgress = { _, _, _, _ -> },
     ) {
         onProgress(tr("Menghapus file lama…", "Removing old files…"))
         target.listFiles().forEach { it.delete() }
-        copyInto(ctx, target, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
+        copyFiles(ctx, target, filesUnder(src), onProgress, onCopy)
     }
 
     /** Taruh mod baru sebagai folder baru di folder hasil. */
@@ -192,38 +195,128 @@ object ModFiles {
         folderName: String,
         src: File,
         onProgress: (String) -> Unit,
-        onFraction: (Float) -> Unit = {},
+        onCopy: CopyProgress = { _, _, _, _ -> },
     ): DocumentFile {
         outRoot.listFiles().firstOrNull { it.name == folderName }?.delete()
         val dir = outRoot.createDirectory(folderName) ?: throw Exception(tr("Tidak bisa membuat folder $folderName", "Can't create folder $folderName"))
-        copyInto(ctx, dir, src, src, onProgress, Counter(downloadedFiles(src).size, onFraction))
+        copyFiles(ctx, dir, filesUnder(src), onProgress, onCopy)
         return dir
     }
 
-    private class Counter(val total: Int, val onFraction: (Float) -> Unit) {
-        var done = 0
-        fun tick() {
-            done++
-            onFraction(done.toFloat() / total.coerceAtLeast(1))
+    /** Semua file di [src] beserta path relatifnya (pakai "/"), tanpa folder internal .DepotDownloader. */
+    private fun filesUnder(src: File): List<Pair<String, File>> =
+        downloadedFiles(src).map { it.relativeTo(src).path.replace('\\', '/') to it }.sortedBy { it.first }
+
+    /**
+     * Isi folder di HP (lewat izin folder Android) yang sudah dibaca, disimpan supaya tidak dibaca ulang
+     * untuk setiap file. Dulu tiap file membaca ulang seluruh isi folder → makin lambat saat folder penuh.
+     */
+    private class DirCache(private val ctx: Context, private val root: Uri) {
+        private class Dir(val uri: Uri, val kids: MutableMap<String, Pair<Uri, Boolean>>)
+        private val dirs = HashMap<String, Dir>()
+
+        private fun list(uri: Uri): MutableMap<String, Pair<Uri, Boolean>> {
+            val docId = DocumentsContract.getDocumentId(uri)
+            return children(ctx, root, docId).associateTo(HashMap()) {
+                it.name.lowercase() to (DocumentsContract.buildDocumentUriUsingTree(root, it.id) to it.isDir)
+            }
+        }
+
+        @Synchronized
+        fun dir(rel: String): Uri {
+            dirs[rel]?.let { return it.uri }
+            val uri = if (rel.isEmpty()) root else {
+                val parentRel = rel.substringBeforeLast('/', "")
+                val name = rel.substringAfterLast('/')
+                val parent = dirs[parentRel] ?: run { dir(parentRel); dirs[parentRel]!! }
+                val hit = parent.kids[name.lowercase()]
+                if (hit != null && hit.second) hit.first else {
+                    val created = DocumentsContract.createDocument(ctx.contentResolver, parent.uri, DocumentsContract.Document.MIME_TYPE_DIR, name)
+                        ?: throw Exception(tr("Gagal membuat folder $rel", "Couldn't create folder $rel"))
+                    parent.kids[name.lowercase()] = created to true
+                    dirs[rel] = Dir(created, HashMap())
+                    return created
+                }
+            }
+            dirs[rel] = Dir(uri, list(uri))
+            return uri
+        }
+
+        /** Uri file (dibuat kalau belum ada). */
+        @Synchronized
+        fun file(rel: String): Uri {
+            val parentRel = rel.substringBeforeLast('/', "")
+            val name = rel.substringAfterLast('/')
+            dir(parentRel)
+            val parent = dirs[parentRel]!!
+            parent.kids[name.lowercase()]?.takeIf { !it.second }?.let { return it.first }
+            val created = DocumentsContract.createDocument(ctx.contentResolver, parent.uri, "application/octet-stream", name)
+                ?: throw Exception(tr("Gagal membuat file $rel", "Couldn't create file $rel"))
+            parent.kids[name.lowercase()] = created to false
+            return created
         }
     }
 
-    private fun copyInto(ctx: Context, target: DocumentFile, srcDir: File, root: File, onProgress: (String) -> Unit, counter: Counter) {
-        srcDir.listFiles()?.sortedBy { it.name }?.forEach { f ->
-            if (f.isDirectory) {
-                if (f.name == ".DepotDownloader") return@forEach
-                val sub = target.createDirectory(f.name) ?: throw Exception(tr("Gagal membuat folder ${f.name}", "Couldn't create folder ${f.name}"))
-                copyInto(ctx, sub, f, root, onProgress, counter)
-            } else {
-                onProgress(tr("Menyalin ${f.relativeTo(root).path}", "Copying ${f.relativeTo(root).path}"))
-                val doc = target.createFile("application/octet-stream", f.name)
-                    ?: throw Exception(tr("Gagal membuat file ${f.name}", "Couldn't create file ${f.name}"))
-                ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
-                    f.inputStream().use { it.copyTo(out) }
-                } ?: throw Exception(tr("Gagal menulis ${f.name}", "Couldn't write ${f.name}"))
-                counter.tick()
+    private const val COPY_LANES = 4
+    private const val COPY_BUFFER = 256 * 1024
+
+    /**
+     * Salin file ke folder mod: isi folder dibaca sekali, 4 file disalin bersamaan, buffer 256 KB.
+     * [files] = (path relatif terhadap [target], file sumber).
+     */
+    private fun copyFiles(
+        ctx: Context,
+        target: DocumentFile,
+        files: List<Pair<String, File>>,
+        onProgress: (String) -> Unit,
+        onCopy: CopyProgress,
+    ) {
+        if (files.isEmpty()) return
+        val cache = DirCache(ctx, target.uri)
+        // folder dibuat dulu satu per satu (urut), baru isi file disalin paralel
+        files.map { it.first.substringBeforeLast('/', "") }.distinct().sorted().forEach { cache.dir(it) }
+        val totalBytes = files.sumOf { it.second.length() }
+        val doneFiles = java.util.concurrent.atomic.AtomicInteger(0)
+        val doneBytes = java.util.concurrent.atomic.AtomicLong(0)
+        val lastReport = java.util.concurrent.atomic.AtomicLong(0)
+        fun report(force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            val prev = lastReport.get()
+            if (force || now - prev >= 150 && lastReport.compareAndSet(prev, now)) {
+                onCopy(doneFiles.get(), files.size, doneBytes.get(), totalBytes)
             }
         }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(COPY_LANES)
+        try {
+            pool.invokeAll(files.map { (rel, f) ->
+                java.util.concurrent.Callable {
+                    val uri = cache.file(rel)
+                    val out = try { ctx.contentResolver.openOutputStream(uri, "wt") } catch (_: Exception) { null }
+                        ?: ctx.contentResolver.openOutputStream(uri, "w")
+                        ?: throw Exception(tr("Gagal menulis $rel", "Couldn't write $rel"))
+                    out.use { o ->
+                        f.inputStream().use { inp ->
+                            val buf = ByteArray(COPY_BUFFER)
+                            while (true) {
+                                val n = inp.read(buf)
+                                if (n < 0) break
+                                o.write(buf, 0, n)
+                                doneBytes.addAndGet(n.toLong())
+                                report()
+                            }
+                        }
+                    }
+                    doneFiles.incrementAndGet()
+                    onProgress(tr("Menyalin $rel", "Copying $rel"))
+                    report()
+                }
+            }).forEach { it.get() } // lempar ulang error dari jalur mana pun
+        } catch (e: java.util.concurrent.ExecutionException) {
+            throw (e.cause as? Exception) ?: e
+        } finally {
+            pool.shutdown()
+        }
+        report(force = true)
     }
 
     /** Tulis ulang file zip lama dengan isi versi baru (struktur folder di dalam zip dipertahankan). */
@@ -492,43 +585,20 @@ object ModFiles {
         src: File,
         plan: UpdatePlan,
         onProgress: (String) -> Unit,
-        onFraction: (Float) -> Unit = {},
+        onCopy: CopyProgress = { _, _, _, _ -> },
     ) {
-        val dirs = mutableMapOf("" to target)
-        fun dirFor(rel: String): DocumentFile {
-            dirs[rel]?.let { return it }
-            val parent = dirFor(rel.substringBeforeLast('/', ""))
-            val name = rel.substringAfterLast('/')
-            val d = parent.listFiles().firstOrNull { it.isDirectory && it.name.equals(name, true) }
-                ?: parent.createDirectory(name)
-                ?: throw Exception(tr("Gagal membuat folder $rel", "Couldn't create folder $rel"))
-            dirs[rel] = d
-            return d
-        }
-        val total = plan.changed.size + plan.obsolete.size
-        var done = 0
-        plan.changed.forEach { rf ->
+        val files = plan.changed.map { rf ->
             val f = File(src, rf.path)
             if (!f.isFile) throw Exception(tr("File hasil download tidak ada: ${rf.path}", "Downloaded file missing: ${rf.path}"))
-            val parent = dirFor(rf.path.substringBeforeLast('/', ""))
-            val name = rf.path.substringAfterLast('/')
-            val doc = parent.findFile(name) ?: parent.createFile("application/octet-stream", name)
-                ?: throw Exception(tr("Gagal membuat file ${rf.path}", "Couldn't create file ${rf.path}"))
-            ctx.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
-                f.inputStream().use { it.copyTo(out) }
-            } ?: throw Exception(tr("Gagal menulis ${rf.path}", "Couldn't write ${rf.path}"))
-            onProgress(tr("Menyalin ${rf.path}", "Copying ${rf.path}"))
-            done++
-            onFraction(done.toFloat() / total.coerceAtLeast(1))
+            rf.path to f
         }
+        copyFiles(ctx, target, files, onProgress, onCopy)
         plan.obsolete.forEach { (rel, uri) ->
             try {
                 DocumentsContract.deleteDocument(ctx.contentResolver, uri)
             } catch (_: Exception) {
             }
             onProgress(tr("Menghapus $rel", "Removing $rel"))
-            done++
-            onFraction(done.toFloat() / total.coerceAtLeast(1))
         }
     }
 

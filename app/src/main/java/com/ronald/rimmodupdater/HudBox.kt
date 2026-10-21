@@ -57,7 +57,9 @@ class HudBox(
 
     init {
         setWillNotDraw(false)
-        setPadding((side + dp(11f)).toInt(), (topSpace + dp(7f)).toInt(), (side + dp(20f)).toInt(), (bottomSpace + dp(7f)).toInt())
+        // kanan: ruang untuk lampu/segitiga indikator; bawah: ruang untuk garis ukur di tepi bawah
+        // → tulisan tidak pernah tertimpa hiasan (kalau panjang, turun ke baris berikutnya)
+        setPadding((side + dp(11f)).toInt(), (topSpace + dp(7f)).toInt(), (side + dp(26f)).toInt(), (bottomSpace + dp(10f)).toInt())
         clipChildren = false
     }
 
@@ -117,12 +119,12 @@ class HudBox(
         line.color = shade(col, g)
         canvas.drawPath(corners, line)
 
-        // garis ukur kecil di kanan bawah
+        // garis ukur kecil menempel di tepi bawah (di bawah area tulisan)
         line.strokeWidth = dp(1f)
         line.color = withA(col, 0.3f + 0.5f * g)
         for (i in 0 until 8) {
-            val x = box.right - dp(14f) - i * dp(6f)
-            canvas.drawLine(x, box.bottom - dp(3f), x, box.bottom - dp(if (i % 2 == 1) 6f else 9f), line)
+            val x = box.right - dp(16f) - i * dp(6f)
+            canvas.drawLine(x, box.bottom, x, box.bottom - dp(if (i % 2 == 1) 2.5f else 5f), line)
         }
 
         // lampu indikator kanan atas: bulat berkedip, atau segitiga ⚠ untuk bahaya

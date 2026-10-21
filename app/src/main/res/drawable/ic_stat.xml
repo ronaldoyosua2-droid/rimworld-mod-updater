@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ikon notifikasi: kotak terminal dengan prompt >_ (putih, sesuai aturan ikon status bar) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M4,4h16a2,2 0,0 1,2 2v12a2,2 0,0 1,-2 2H4a2,2 0,0 1,-2 -2V6a2,2 0,0 1,2 -2zM4,6v12h16V6H4z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M6.3,8.6l1.4,-1.4L11.5,11l-3.8,3.8l-1.4,-1.4L8.7,11z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,14h6v2h-6z" />
+</vector>

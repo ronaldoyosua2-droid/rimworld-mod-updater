@@ -1,2 +1,5 @@
-- 📏 **More room for your mods:** `last_scan` and `last_update` are now two plain lines under `steam_session` instead of a large glowing box, so the mod list starts higher on the screen.
-- 🗂️ Mod cards are unchanged: every detail and the status-colored `UPD_LOG` box are still shown.
+- ⚡ **Much faster COPYING:** folder contents are read once instead of once per file, 4 files are copied at the same time and with a bigger buffer. Large mods with hundreds of files no longer take 20+ minutes to copy.
+- 📊 **Honest progress:** during COPYING the percentage now follows the files actually copied, with copy speed, time left and elapsed time. When a mod finishes, the terminal shows how long the download and the copy took.
+- 📲 **Keeps running when you switch apps:** scans and updates continue in the background with a progress notification (OPEN / CANCEL). If you are in another app when it finishes, a summary notification tells you the result.
+- ☰ **Menu works during a task:** you can open the side menu and the log while something is running. Switching games, output folder and language are locked until the task ends.
+- 🛠️ **UPD_LOG box fix:** long text no longer runs into the indicator light and gauge marks; it wraps to the next line instead.
