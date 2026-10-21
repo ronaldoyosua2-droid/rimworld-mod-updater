@@ -47,12 +47,13 @@ jobs:
           {
             cat .github/release/INTRO.md
             echo
-            echo "## ✨ What's new · build ${{ github.run_number }}"
+            echo "## ✨ What's new in build ${{ github.run_number }}"
             echo
             cat WHATS_NEW.md
             echo
             echo "---"
-            echo "📥 **Cara install:** download **SteamodUpdater.apk** di bawah, lalu install di HP. Bisa langsung ditimpa di atas versi lama, data mod & login tetap tersimpan."
+            echo
+            cat .github/release/OUTRO.md
           } > release_notes.md
 
       - name: Publish release

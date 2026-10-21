@@ -1,2 +1,2 @@
-- 🛠️ **Perbaikan kotak HUD:** siku kuning di kiri-kanan kotak `UPD_LOG` (di kartu mod) dan cahayanya tidak terpotong lagi.
-- 📐 Jarak kotak `SYS_LOG` dan `UPD_LOG` dirapikan supaya cahaya berdenyutnya terlihat utuh.
+- 🛠️ **HUD box fix:** the yellow corner brackets on the `UPD_LOG` box inside each mod card and their glow are no longer cut off.
+- 📐 Spacing of the `SYS_LOG` and `UPD_LOG` boxes tidied up so the pulsing glow is fully visible.
