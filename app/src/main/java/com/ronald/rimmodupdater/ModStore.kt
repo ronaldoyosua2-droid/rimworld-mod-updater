@@ -41,6 +41,8 @@ data class ModEntry(
     /** Kapan mod ini terakhir diupdate lewat aplikasi (ms epoch, 0 = belum pernah) & jumlah file yang disalin. */
     var lastUpdated: Long = 0,
     var lastUpdatedFiles: Int = 0,
+    /** Baru ditemukan saat folder dibaca ulang (label NEW sampai dicek). */
+    var isNew: Boolean = false,
 ) {
     /** Zomboid: satu item Workshop bisa berisi banyak mod, jadi tampilkan nama mod lokal. */
     val displayName: String
@@ -68,6 +70,7 @@ data class ModEntry(
         put("coverageChecked", coverageChecked)
         put("lastUpdated", lastUpdated)
         put("lastUpdatedFiles", lastUpdatedFiles)
+        put("isNew", isNew)
     }
 
     companion object {
@@ -93,6 +96,7 @@ data class ModEntry(
             coverageChecked = o.optBoolean("coverageChecked"),
             lastUpdated = o.optLong("lastUpdated"),
             lastUpdatedFiles = o.optInt("lastUpdatedFiles"),
+            isNew = o.optBoolean("isNew"),
         )
     }
 }

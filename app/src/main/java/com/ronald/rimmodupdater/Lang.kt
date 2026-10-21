@@ -28,7 +28,7 @@ fun tr(id: String, en: String): String = if (Lang.en) en else id
 object StatusKind {
     private val failed = listOf("Gagal", "Error", "ID Workshop belum", "ID kemungkinan salah", "Failed", "Workshop ID not", "Workshop ID uncertain", "ID probably wrong")
     private val suspect = listOf("ID kemungkinan salah", "ID probably wrong", "ID Workshop belum pasti", "Workshop ID uncertain")
-    private val ok = listOf("Terbaru", "Berhasil", "Sudah", "Up to date", "Updated", "Already")
+    private val ok = listOf("Terbaru", "Berhasil", "Sudah", "Terpasang", "Up to date", "Updated", "Already", "Installed")
     private val unchecked = setOf("Belum dicek", "Not checked")
 
     fun isFailed(s: String) = failed.any { s.startsWith(it) }
@@ -68,6 +68,7 @@ object StatusText {
         "Gagal cek isi: {0}" to "Failed content check: {0}",
         "Gagal: perlu login Steam lagi" to "Failed: Steam login needed again",
         "Berhasil diupdate ✓ ({0})" to "Updated ✓ ({0})",
+        "Terpasang ✓ ({0})" to "Installed ✓ ({0})",
         "ID Workshop belum pasti: kandidat terbaik {0} hanya {1}% cocok. Cek di Workshop lalu isi manual." to
             "Workshop ID uncertain: best candidate {0} is only {1}% similar. Check the Workshop and enter it manually.",
         "ID kemungkinan salah: hanya {0}% file lokal ada di item Workshop ini (versi B41/B42 lain atau modpack?). Tekan FIND ID." to

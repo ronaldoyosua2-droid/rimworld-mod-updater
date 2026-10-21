@@ -41,17 +41,27 @@ class JobService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** startId perintah terakhir; stopSelf(id) tidak mematikan layanan kalau sudah ada perintah yang lebih baru. */
+    private var lastStartId = 0
+    private val pendingStop = Runnable { stopEverything() }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId // id perintah terbaru (apa pun jenisnya)
         when (intent?.action) {
             ACTION_CANCEL -> {
                 JobState.onCancel?.invoke()
                 return START_NOT_STICKY
             }
             ACTION_STOP -> {
-                stopEverything()
+                // ditunda sebentar: kalau proses baru langsung menyusul (mis. Cari ID → Cek update),
+                // notifikasi cukup berganti isi, tidak hilang-muncul
+                main.removeCallbacks(pendingStop)
+                main.postDelayed(pendingStop, 1200)
                 return START_NOT_STICKY
             }
         }
+        // perintah "mulai": langsung pasang notifikasi (Android menunggu ini), batalkan "berhenti" yang tertunda
+        main.removeCallbacks(pendingStop)
         ensureChannels(this)
         val n = build()
         try {
@@ -112,7 +122,8 @@ class JobService : Service() {
         try { wake?.release() } catch (_: Exception) {}
         wake = null
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
-        stopSelf()
+        // hanya berhenti kalau tidak ada perintah "mulai" yang lebih baru
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {

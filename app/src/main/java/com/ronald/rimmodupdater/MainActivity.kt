@@ -301,13 +301,22 @@ class MainActivity : AppCompatActivity() {
             addView(steamButton, LinearLayout.LayoutParams(px(96), ViewGroup.LayoutParams.WRAP_CONTENT))
         }
 
-        val bFolder = button("[+] FOLDER") { pickFolder.launch(null) }
-        val bZip = button("[+] ZIP") { pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
+        val bInstall = button("[+] INSTALL") { showInstallSearch() }
+        val bFolder = button("[+] FOLDER") {
+            // RimWorld: pilih folder atau zip; Zomboid: hanya folder
+            if (game == Game.RIMWORLD) CmdDialog(this)
+                .setTitle(tr("Tambah mod", "Add mods"))
+                .setItems(arrayOf(tr("Folder mod / folder Mods", "Mod folder / Mods folder"), tr("File zip mod", "Mod zip file"))) { _, i ->
+                    if (i == 0) pickFolder.launch(null)
+                    else pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                }.show()
+            else pickFolder.launch(null)
+        }
         val bLink = button("[+] LINK/ID") { askAddLink() }
-        val bCheck = button("SCAN UPDATE", solid = true) { checkUpdates() }
+        val bCheck = button("SCAN UPDATE", solid = true) { scanAll() }
         val bAll = button("UPDATE ALL") { updateAll() }
         val bLog = button("LOG") { showLogDialog() }
-        actionButtons += listOf(bFolder, bZip, bLink, bCheck, bAll)
+        actionButtons += listOf(bInstall, bFolder, bLink, bCheck, bAll)
 
         headerReveal = ScanReveal(this).apply {
             addView(LinearLayout(this@MainActivity).apply {
@@ -323,7 +332,7 @@ class MainActivity : AppCompatActivity() {
                     setPadding(0, 0, 0, px(8))
                 }
                 addView(summaryText)
-                addView(row(bFolder, bZip, bLink))
+                addView(row(bInstall, bFolder, bLink))
                 addView(row(bCheck, bAll, bLog))
             })
         }
@@ -738,7 +747,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(px(12), px(10), px(12), px(10))
         }
-        box.addView(term(m.displayName + "  ⧉", 14f, Hx.BRIGHT, bold = true).apply {
+        box.addView(term(m.displayName + (if (m.isNew) "  [NEW]" else "") + "  ⧉", 14f, Hx.BRIGHT, bold = true).apply {
             // ketuk = salin nama, tekan lama = menu (salin folder, cari di Workshop, buka halaman)
             setOnClickListener { copyText(m.displayName, tr("Nama mod", "Mod name")) }
             setOnLongClickListener { modMenu(m); true }
@@ -1335,6 +1344,373 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ check
 
+    // ------------------------------------------------------------------ baca ulang folder mod
+
+    private var lastRescan = 0L
+
+    override fun onResume() {
+        super.onResume()
+        // kembali ke aplikasi (mis. dari Zomdroid): cek folder mod, mod baru langsung muncul
+        if (!busy && System.currentTimeMillis() - lastRescan > 5000) lifecycleScope.launch { rescanFolders() }
+    }
+
+    /**
+     * Baca ulang folder mod yang pernah ditambahkan: folder baru → masuk daftar (NEW),
+     * folder yang hilang → ditandai merah, folder yang kembali → normal lagi. Tanpa internet.
+     */
+    private suspend fun rescanFolders(): Pair<Int, Int> {
+        lastRescan = System.currentTimeMillis()
+        val g = game
+        val roots = mods.filter { it.game == g.key && it.sourceType == "folder" && it.sourceUri != null && it.subPath.isNotBlank() }
+            .mapNotNull { it.sourceUri }.distinct()
+        var added = 0
+        var gone = 0
+        val goneText = tr("Gagal: folder mod tidak ada di HP (sudah dicek ulang). Tekan DEL untuk buang dari daftar.",
+            "Failed: mod folder is not on the phone (rescanned). Tap DEL to remove it from the list.")
+        for (root in roots) {
+            val uri = Uri.parse(root)
+            val names = withContext(Dispatchers.IO) { try { ModFiles.subfolderNames(this@MainActivity, uri) } catch (_: Exception) { null } }
+            if (names.isNullOrEmpty()) continue // izin hilang / tidak terbaca: jangan tandai semuanya hilang
+            val known = mods.filter { it.game == g.key && it.sourceType == "folder" && it.sourceUri == root }
+            // folder hilang / kembali
+            known.filter { it.subPath.isNotBlank() }.forEach { m ->
+                val here = m.subPath.lowercase() in names
+                val markedGone = m.status.contains("rescanned") || m.status.contains("dicek ulang")
+                if (!here && !markedGone) {
+                    m.status = goneText; m.updateAvailable = false; gone++
+                } else if (here && markedGone) {
+                    m.status = tr("Belum dicek", "Not checked") // foldernya kembali
+                }
+            }
+            // folder baru (hanya dibaca isinya kalau memang ada yang baru)
+            val knownNames = mods.filter { it.game == g.key && it.sourceType == "folder" }.mapTo(HashSet()) { it.subPath.lowercase() }
+            if (names.any { it !in knownNames }) {
+                val scanned = withContext(Dispatchers.IO) {
+                    try {
+                        if (g == Game.ZOMBOID) ModFiles.scanZomboid(this@MainActivity, uri) else ModFiles.scanTree(this@MainActivity, uri)
+                    } catch (e: Exception) {
+                        AppLog.w("Baca ulang folder gagal: ${e.message}"); emptyList()
+                    }
+                }
+                scanned.filter { it.subPath.isNotBlank() && it.subPath.lowercase() !in knownNames }.forEach { sm ->
+                    mods += ModEntry(
+                        workshopId = sm.workshopId ?: "",
+                        name = sm.name,
+                        sourceType = "folder",
+                        sourceUri = root,
+                        subPath = sm.subPath,
+                        localTime = sm.localTime,
+                        status = tr("Belum dicek", "Not checked"),
+                        game = g.key,
+                        modId = sm.modId,
+                        isNew = true,
+                    )
+                    added++
+                    if (busy) panel.log("NEW", sm.name, "✓")
+                }
+            }
+        }
+        if (added + gone > 0) {
+            AppLog.i("Baca ulang folder: +$added baru, $gone hilang")
+            store.save(mods)
+            renderList()
+            val parts = listOfNotNull(
+                if (added > 0) tr("$added mod baru ditambahkan", "$added new mods added") else null,
+                if (gone > 0) tr("$gone folder hilang", "$gone folders missing") else null,
+            )
+            toast(parts.joinToString(" · "))
+        }
+        return added to gone
+    }
+
+    /** SCAN UPDATE: baca ulang folder dulu, cari ID untuk mod baru (Zomboid), lalu cek update. */
+    private fun scanAll() {
+        if (busy) return
+        lifecycleScope.launch {
+            rescanFolders()
+            val noId = visible.filter { it.workshopId.isBlank() && it.sourceType == "folder" && it.isNew }
+            if (game == Game.ZOMBOID && noId.isNotEmpty()) discoverZomboidIds(noId) else checkUpdates()
+        }
+    }
+
+    // ------------------------------------------------------------------ [+] INSTALL
+
+    /** Folder tempat mod baru dipasang: folder mod yang sudah dipakai di game ini, atau folder hasil. */
+    private fun installRootUri(): String? =
+        mods.filter { it.game == game.key && it.sourceType == "folder" && it.subPath.isNotBlank() && it.sourceUri != null }
+            .groupingBy { it.sourceUri!! }.eachCount().maxByOrNull { it.value }?.key
+            ?: store.outputFor(game.key)
+
+    private fun isInstalled(id: String) = mods.any { it.game == game.key && it.workshopId == id && it.sourceType != "none" }
+
+    private val thumbCache = HashMap<String, android.graphics.Bitmap>()
+
+    private fun loadThumb(url: String, into: android.widget.ImageView) {
+        thumbCache[url]?.let { into.setImageBitmap(it); return }
+        lifecycleScope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                try {
+                    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    c.connectTimeout = 10_000; c.readTimeout = 15_000
+                    val bytes = c.inputStream.use { it.readBytes() }
+                    c.disconnect()
+                    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+                    var sample = 1
+                    while (o.outWidth / sample > 192) sample *= 2
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                        android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                } catch (_: Exception) { null }
+            }
+            if (bmp != null) { thumbCache[url] = bmp; into.setImageBitmap(bmp) }
+        }
+    }
+
+    /** Pencarian mod Workshop di dalam aplikasi, lalu INSTALL langsung ke folder mod. */
+    private fun showInstallSearch() {
+        if (busy) return
+        val input = EditText(this).apply {
+            hint = tr("Nama mod…", "Mod name…")
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            setSingleLine()
+        }
+        val info = term("", 10f, Hx.DIM)
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(input)
+            addView(info)
+            addView(results)
+        }
+        var dialog: android.app.Dialog? = null
+        fun doSearch() {
+            val q = input.text.toString().trim()
+            if (q.isEmpty()) return
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
+            info.text = tr("> mencari \"$q\"…", "> searching \"$q\"…")
+            results.removeAllViews()
+            lifecycleScope.launch {
+                val details = withContext(Dispatchers.IO) {
+                    try {
+                        val ids = WorkshopSearch.search(game.appId, q, 12)
+                        val d = WorkshopApi.getDetails(ids)
+                        ids.mapNotNull { d[it] }.filter { it.ok && (it.appId == 0 || it.appId == game.appId) }
+                    } catch (e: Exception) {
+                        AppLog.w("Pencarian Workshop gagal: ${e.message}"); null
+                    }
+                }
+                if (details == null) { info.text = tr("> gagal mencari. Cek internet.", "> search failed. Check your internet."); return@launch }
+                info.text = tr("> ${details.size} hasil · tekan INSTALL untuk memasang", "> ${details.size} results · tap INSTALL to install")
+                details.forEach { d -> results.addView(resultRow(d) { dialog?.dismiss(); confirmInstall(d) }) }
+            }
+        }
+        input.setOnEditorActionListener { _, _, _ -> doSearch(); true }
+        dialog = CmdDialog(this)
+            .setTitle("workshop_search --game ${game.key}")
+            .setMessage(tr("Cari mod di Steam Workshop, lalu pasang langsung ke folder mod-mu.", "Search Steam Workshop and install mods straight into your mod folder."))
+            .setView(box)
+            .setNeutralButton(tr("Tutup", "Close"), null)
+            .setPositiveButton(tr("Cari", "Search")) { _, _ -> }
+            .show()
+        // tombol Cari tidak menutup dialog: ganti aksinya setelah tampil
+        dialog.window?.decorView?.post {
+            fun find(v: View): TextView? = when (v) {
+                is TextView -> if (v.text.toString().equals(tr("Cari", "Search"), true)) v else null
+                is ViewGroup -> (0 until v.childCount).firstNotNullOfOrNull { find(v.getChildAt(it)) }
+                else -> null
+            }
+            dialog.window?.decorView?.let { find(it) }?.setOnClickListener { doSearch() }
+        }
+        input.requestFocus()
+    }
+
+    private fun resultRow(d: WorkshopApi.Details, onInstall: () -> Unit): View {
+        val installed = isInstalled(d.id)
+        val build = if (game == Game.ZOMBOID) d.pzBuild else null
+        val b41Only = build == "B41"
+        val thumb = android.widget.ImageView(this).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = boxBg(0xFF0B1A12.toInt(), Hx.DARK, 4)
+            clipToOutline = true
+        }
+        d.previewUrl?.let { loadThumb(it, thumb) }
+        val meta = buildString {
+            if (build != null) append("[$build] ")
+            if (d.fileSize > 0) append(fmtSize(d.fileSize)).append(" · ")
+            append(fmt(d.timeUpdated))
+            if (d.subscriptions > 0) append("\n").append(tr("${d.subscriptions} pelanggan", "${d.subscriptions} subs"))
+        }
+        val btn = TextView(this).apply {
+            text = when {
+                installed -> tr("✓ TERPASANG", "✓ INSTALLED")
+                b41Only -> "B41"
+                else -> "INSTALL"
+            }
+            textSize = 10f
+            typeface = Hx.MONO_BOLD
+            gravity = Gravity.CENTER
+            setPadding(px(8), px(7), px(8), px(7))
+            val solid = !installed && !b41Only
+            setTextColor(if (solid) Hx.ON_GREEN else Hx.GREEN)
+            background = boxBg(if (solid) Hx.GREEN else 0x00000000, Hx.GREEN, 4)
+            alpha = if (b41Only) 0.4f else 1f
+            setOnClickListener {
+                when {
+                    installed -> toast(tr("Mod ini sudah terpasang", "This mod is already installed"))
+                    b41Only -> CmdDialog(this@MainActivity)
+                        .setTitle(d.title ?: d.id)
+                        .setMessage(tr("Mod ini bertanda Build 41. Tetap pasang?", "This mod is tagged Build 41. Install anyway?"))
+                        .setPositiveButton("INSTALL") { _, _ -> onInstall() }
+                        .setNegativeButton(tr("Batal", "Cancel"), null).show()
+                    else -> onInstall()
+                }
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(7), px(7), px(7), px(7))
+            background = boxBg(0x00000000, Hx.DARK, 6)
+            addView(thumb, LinearLayout.LayoutParams(px(46), px(46)))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(px(8), 0, px(6), 0)
+                addView(term(d.title ?: d.id, 11.5f, Hx.BRIGHT, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                addView(term(meta, 9.5f, Hx.DIM))
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(btn)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(6) }
+        }
+    }
+
+    /** Cek mod yang dibutuhkan (Required items), lalu konfirmasi dan pasang. */
+    private fun confirmInstall(d: WorkshopApi.Details) {
+        lifecycleScope.launch {
+            toast(tr("Memeriksa mod yang dibutuhkan…", "Checking required mods…"))
+            val req = withContext(Dispatchers.IO) {
+                try {
+                    val ids = WorkshopSearch.requiredItems(d.id).filter { !isInstalled(it) }
+                    if (ids.isEmpty()) emptyList() else WorkshopApi.getDetails(ids).values.filter { it.ok }
+                } catch (e: Exception) {
+                    AppLog.w("Cek Required items gagal: ${e.message}"); emptyList()
+                }
+            }
+            val root = installRootUri()
+            val rootName = root?.let { Uri.decode(it).substringAfterLast('/').substringAfterLast(':') } ?: "?"
+            val checks = req.map { r ->
+                android.widget.CheckBox(this@MainActivity).apply {
+                    text = "${r.title ?: r.id} · ${fmtSize(r.fileSize)}"
+                    isChecked = true
+                    setTextColor(Hx.BRIGHT)
+                    typeface = Hx.MONO
+                    textSize = 11.5f
+                    buttonTintList = android.content.res.ColorStateList.valueOf(Hx.GREEN)
+                }
+            }
+            val view = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                checks.forEach { addView(it) }
+            }
+            val msg = buildString {
+                append(tr("size   : ", "size   : ")).append(fmtSize(d.fileSize)).append("\n")
+                append(tr("target : ", "target : ")).append(if (root != null) rootName else tr("(pilih folder dulu)", "(choose a folder first)"))
+                if (req.isNotEmpty()) append("\n").append(tr("butuh ${req.size} mod yang belum terpasang:", "requires ${req.size} mod(s) that aren't installed:"))
+            }
+            CmdDialog(this@MainActivity)
+                .setTitle("install \"${d.title ?: d.id}\"")
+                .setMessage(msg)
+                .setView(if (checks.isEmpty()) null else view)
+                .setNegativeButton(tr("Batal", "Cancel"), null)
+                .setPositiveButton("INSTALL") { _, _ ->
+                    val chosen = listOf(d) + req.filterIndexed { i, _ -> checks[i].isChecked }
+                    installMods(chosen)
+                }
+                .show()
+        }
+    }
+
+    /** Download & pasang mod baru langsung ke folder mod game ini. */
+    private fun installMods(list: List<WorkshopApi.Details>) {
+        if (busy || list.isEmpty()) return
+        val rootUri = installRootUri()
+        if (rootUri == null) {
+            CmdDialog(this)
+                .setTitle(tr("Pilih folder mod", "Choose mod folder"))
+                .setMessage(if (game == Game.ZOMBOID) tr("Pilih folder Zomboid/mods milik Zomdroid. Mod akan dipasang di sana.", "Pick Zomdroid's Zomboid/mods folder. Mods will be installed there.")
+                    else tr("Pilih folder Mods RimWorld (RimDroid). Mod akan dipasang di sana.", "Pick RimWorld's Mods folder (RimDroid). Mods will be installed there."))
+                .setPositiveButton(tr("Pilih", "Choose")) { _, _ -> afterOutputPicked = { installMods(list) }; pickOutput.launch(null) }
+                .setNegativeButton(tr("Batal", "Cancel"), null).show()
+            return
+        }
+        job {
+            setBusy(true, tr("Menghubungkan ke Steam…", "Connecting to Steam…"))
+            panel.start("INSTALL · ${list.size} MOD", tr("Menghubungkan ke Steam…", "Connecting to Steam…"), "LOGIN")
+            if (!ensureSteam()) { setBusy(false); return@job }
+            refreshSteamStatus()
+            val root = DocumentFile.fromTreeUri(this@MainActivity, Uri.parse(rootUri))
+            if (root == null || !root.canWrite()) {
+                toast(tr("Folder mod tidak bisa ditulis. Tambahkan ulang foldernya.", "Can't write to the mod folder. Add the folder again."))
+                setBusy(false); return@job
+            }
+            var ok = 0
+            val states = list.map { (it.title ?: it.id) to ProgressPanel.ItemState.PENDING }.toMutableList()
+            list.forEachIndexed { i, d ->
+                val name = d.title ?: d.id
+                states[i] = name to ProgressPanel.ItemState.CURRENT
+                panel.items(states.toList())
+                panel.caption("INSTALL · ${i + 1} OF ${list.size}")
+                panel.title(name)
+                AppLog.i("Install ${d.id} ($name) ke $rootUri")
+                val tmp = ModEntry(workshopId = d.id, name = name, sourceType = "none", game = game.key,
+                    remoteTitle = d.title, remoteVersion = d.contentId, remoteSize = d.fileSize, remoteTime = d.timeUpdated)
+                val written = mutableListOf<String>()
+                try {
+                    updateOne(tmp, { progress(it) }, rootOverride = root, written = written, onFraction = { f -> setFraction(f) })
+                    written.forEach { folder ->
+                        upsert(ModEntry(
+                            workshopId = d.id,
+                            name = if (written.size == 1) name else folder,
+                            sourceType = "folder",
+                            sourceUri = rootUri,
+                            subPath = folder,
+                            remoteTitle = d.title,
+                            remoteTime = d.timeUpdated,
+                            remoteSize = d.fileSize,
+                            remoteVersion = d.contentId,
+                            installedVersion = d.contentId,
+                            contentPrefix = if (game == Game.ZOMBOID) "mods/$folder/" else "",
+                            game = game.key,
+                            status = tr("Terpasang ✓ (${fmt(d.timeUpdated)})", "Installed ✓ (${fmt(d.timeUpdated)})"),
+                            lastUpdated = System.currentTimeMillis(),
+                            lastUpdatedFiles = tmp.lastUpdatedFiles,
+                            coverageChecked = true,
+                        ))
+                    }
+                    ok++
+                    states[i] = name to ProgressPanel.ItemState.DONE
+                    panel.log("DONE", "$name → ${written.joinToString()}", "✓")
+                } catch (e: Exception) {
+                    AppLog.e("Install ${d.id} gagal", e)
+                    states[i] = name to ProgressPanel.ItemState.FAILED
+                    panel.log("FAIL", "$name: ${e.message}", error = true)
+                }
+                panel.items(states.toList())
+                store.save(mods)
+                runOnUiThread { renderList() }
+            }
+            if (ok > 0) store.setLastUpdate(game.key, ok)
+            panel.caption("INSTALL · " + tr("SELESAI", "DONE"))
+            panel.title(tr("$ok dari ${list.size} terpasang", "$ok of ${list.size} installed"))
+            panel.badge(tr("SELESAI", "DONE"))
+            panel.fraction(1f)
+            panel.detail("")
+            setBusy(false)
+            lastRescan = System.currentTimeMillis()
+            toast(tr("Selesai: $ok dari ${list.size} mod terpasang", "Done: $ok of ${list.size} mods installed"))
+        }
+    }
+
     private fun checkUpdates() {
         if (busy) return
         val targets = visible.filter { it.workshopId.isNotBlank() }
@@ -1508,6 +1884,7 @@ class MainActivity : AppCompatActivity() {
                 store.save(mods)
                 renderList()
                 val updates = targets.count { it.updateAvailable && it in mods }
+                visible.forEach { it.isNew = false }
                 store.setLastScan(game.key, targets.size)
                 renderSummary()
                 panel.caption(tr("CEK UPDATE · SELESAI", "CHECK UPDATES · DONE"))
@@ -1613,7 +1990,7 @@ class MainActivity : AppCompatActivity() {
                 panel.badge("DOWNLOAD")
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
-                    updateOne(m, { progress(it) }) { f -> setFraction(f) }
+                    updateOne(m, { progress(it) }, onFraction = { f -> setFraction(f) })
                     ok++
                     states[i] = m.displayName to ProgressPanel.ItemState.DONE
                     panel.log("DONE", m.displayName, "✓")
@@ -1660,6 +2037,8 @@ class MainActivity : AppCompatActivity() {
     private suspend fun updateOne(
         m: ModEntry,
         onProgress: (String) -> Unit,
+        rootOverride: DocumentFile? = null,
+        written: MutableList<String>? = null,
         onFraction: (Float) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val work = File(cacheDir, "dl/${m.workshopId}")
@@ -1809,7 +2188,7 @@ class MainActivity : AppCompatActivity() {
                     ModFiles.rewriteZip(this@MainActivity, Uri.parse(m.sourceUri), m.zipPrefix, work, copyLog(onProgress), copyFrac)
                 }
                 else -> {
-                    val out = outputRoot() ?: throw Exception(tr("Folder hasil belum dipilih", "Output folder not chosen yet"))
+                    val out = rootOverride ?: outputRoot() ?: throw Exception(tr("Folder hasil belum dipilih", "Output folder not chosen yet"))
                     val zMods = work.walkTopDown().maxDepth(3)
                         .firstOrNull { it.isDirectory && it.name.equals("mods", true) }
                     if (m.game == Game.ZOMBOID.key && zMods != null) {
@@ -1824,6 +2203,7 @@ class MainActivity : AppCompatActivity() {
                             ModFiles.writeNewFolder(this@MainActivity, out, d.name, d, copyLog(onProgress)) { done, _, b, _ ->
                                 copyCb(fb + done, copyTotal, bb + b, allBytes)
                             }
+                            written?.add(d.name)
                             val sub = ModFiles.downloadedFiles(d)
                             filesBefore += sub.size
                             bytesBefore += sub.sumOf { it.length() }
@@ -1831,6 +2211,7 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         val folderName = ModFiles.safeFolderName(m.displayName, m.workshopId)
                         ModFiles.writeNewFolder(this@MainActivity, out, folderName, work, copyLog(onProgress), copyCb)
+                        written?.add(folderName)
                     }
                 }
             }

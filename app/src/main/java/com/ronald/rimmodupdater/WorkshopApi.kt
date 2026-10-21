@@ -17,7 +17,21 @@ object WorkshopApi {
         val appId: Int,
         /** ID versi konten (manifest) di Steam. Berubah setiap kali mod di-update. */
         val contentId: String,
-    )
+        val previewUrl: String? = null,
+        val subscriptions: Long = 0,
+        val tags: List<String> = emptyList(),
+    ) {
+        /** Versi Project Zomboid dari tag Workshop ("Build 42" / "Build 41"), atau null kalau tidak ada. */
+        val pzBuild: String?
+            get() {
+                val t = tags.joinToString(" ").lowercase() + " " + (title ?: "").lowercase()
+                return when {
+                    "build 42" in t || "b42" in t -> "B42"
+                    "build 41" in t || "b41" in t -> "B41"
+                    else -> null
+                }
+            }
+    }
 
     /** Ambil ID Workshop dari link (…?id=123…) atau angka biasa. */
     fun parseId(input: String): String? {
@@ -59,6 +73,9 @@ object WorkshopApi {
                             fileSize = o.optString("file_size").toLongOrNull() ?: 0L,
                             appId = o.optInt("consumer_app_id"),
                             contentId = o.optString("hcontent_file"),
+                            previewUrl = o.optString("preview_url").ifBlank { null },
+                            subscriptions = o.optLong("subscriptions"),
+                            tags = o.optJSONArray("tags")?.let { a -> List(a.length()) { a.optJSONObject(it)?.optString("tag") ?: "" } }.orEmpty(),
                         )
                     }
                 }

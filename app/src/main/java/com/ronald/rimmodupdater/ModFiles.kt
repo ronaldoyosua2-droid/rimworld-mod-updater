@@ -670,6 +670,10 @@ object ModFiles {
         return out
     }
 
+    /** Nama semua sub-folder langsung di [treeUri] (huruf kecil). Satu kali baca, cepat. */
+    fun subfolderNames(ctx: Context, treeUri: Uri): Set<String> =
+        children(ctx, treeUri, DocumentsContract.getTreeDocumentId(treeUri)).filter { it.isDir }.mapTo(HashSet()) { it.name.lowercase() }
+
     /** Awalan "…/mods/<folder>/" di daftar file item Workshop, atau null kalau folder itu tidak ada. */
     fun findModPrefix(remote: List<RemoteFile>, folder: String): String? {
         val needle = "mods/${folder.lowercase()}/"

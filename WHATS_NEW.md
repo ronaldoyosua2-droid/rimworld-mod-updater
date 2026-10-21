@@ -1,5 +1,4 @@
-- ⚡ **Much faster COPYING:** folder contents are read once instead of once per file, 4 files are copied at the same time and with a bigger buffer. Large mods with hundreds of files no longer take 20+ minutes to copy.
-- 📊 **Honest progress:** during COPYING the percentage now follows the files actually copied, with copy speed, time left and elapsed time. When a mod finishes, the terminal shows how long the download and the copy took.
-- 📲 **Keeps running when you switch apps:** scans and updates continue in the background with a progress notification (OPEN / CANCEL). If you are in another app when it finishes, a summary notification tells you the result.
-- ☰ **Menu works during a task:** you can open the side menu and the log while something is running. Switching games, output folder and language are locked until the task ends.
-- 🛠️ **UPD_LOG box fix:** long text no longer runs into the indicator light and gauge marks; it wraps to the next line instead.
+- 🛒 **New `[+] INSTALL` button:** search Steam Workshop inside the app (with preview image, size, date and B42/B41 tag) and install a mod straight into your mod folder. Mods you already have show as **✓ INSTALLED**, B41-only mods are dimmed, and missing **Required items** are offered for install too.
+- 🔄 **New mods are picked up automatically:** when you come back to the app (for example from Zomdroid) and when you tap SCAN UPDATE, your mod folder is re-read. New mods appear with a **[NEW]** tag and their Workshop ID is found during the scan; folders you deleted are marked red.
+- 🗂️ For RimWorld, adding a zip now lives inside **[+] FOLDER** (choose folder or zip).
+- 🐞 **Crash fix:** the app no longer closes when one task immediately starts another (e.g. Find ID followed by Check updates).
