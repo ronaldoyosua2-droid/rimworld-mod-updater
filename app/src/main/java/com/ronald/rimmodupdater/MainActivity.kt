@@ -260,12 +260,12 @@ class MainActivity : AppCompatActivity() {
                     topMargin = px(12)
                 })
                 addView(steamRow)
-                addView(HudBox(this@MainActivity, "SYS_LOG · 01", "X_300:1").apply {
-                    summaryText = term("", 11.5f, Hx.DIM).apply { setLineSpacing(px(3).toFloat(), 1f) }
-                    addView(summaryText)
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = px(6)
-                })
+                // ringkasan last_scan / last_update: teks biasa, tanpa kotak (hemat layar)
+                summaryText = term("", 11.5f, Hx.DIM).apply {
+                    setLineSpacing(px(2).toFloat(), 1f)
+                    setPadding(0, 0, 0, px(8))
+                }
+                addView(summaryText)
                 addView(row(bFolder, bZip, bLink))
                 addView(row(bCheck, bAll, bLog))
             })

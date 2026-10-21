@@ -1,4 +1,2 @@
-- 🟢 **Status-colored glow:** the `UPD_LOG` box on every mod card now glows in the color of its status.
-  - **Up to date:** green, with a slow, calm pulse.
-  - **Update available:** amber, normal pulse.
-  - **Failed / wrong ID / error:** red, with a faster pulse and a blinking ⚠ danger triangle instead of the round light.
+- 📏 **More room for your mods:** `last_scan` and `last_update` are now two plain lines under `steam_session` instead of a large glowing box, so the mod list starts higher on the screen.
+- 🗂️ Mod cards are unchanged: every detail and the status-colored `UPD_LOG` box are still shown.
