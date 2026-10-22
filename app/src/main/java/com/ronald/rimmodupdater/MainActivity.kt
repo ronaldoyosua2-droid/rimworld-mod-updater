@@ -998,6 +998,11 @@ class MainActivity : AppCompatActivity() {
                 entry.updateAvailable = old.updateAvailable
                 entry.status = old.status
             }
+            // catatan last_update selalu ikut (dulu hilang saat folder ditambah / dibaca ulang)
+            if (oldSameFolder && entry.lastUpdated == 0L) {
+                entry.lastUpdated = old.lastUpdated
+                entry.lastUpdatedFiles = old.lastUpdatedFiles
+            }
             mods[mods.indexOfFirst { it === old }] = entry
         } else {
             mods.add(entry)

@@ -1,4 +1,1 @@
-- 🛒 **New `[+] INSTALL` button:** search Steam Workshop inside the app (with preview image, size, date and B42/B41 tag) and install a mod straight into your mod folder. Mods you already have show as **✓ INSTALLED**, B41-only mods are dimmed, and missing **Required items** are offered for install too.
-- 🔄 **New mods are picked up automatically:** when you come back to the app (for example from Zomdroid) and when you tap SCAN UPDATE, your mod folder is re-read. New mods appear with a **[NEW]** tag and their Workshop ID is found during the scan; folders you deleted are marked red.
-- 🗂️ For RimWorld, adding a zip now lives inside **[+] FOLDER** (choose folder or zip).
-- 🐞 **Crash fix:** the app no longer closes when one task immediately starts another (e.g. Find ID followed by Check updates).
+- 🕒 **last_update is kept:** a mod's last-update date and file count are no longer reset to `never` when its folder is added or re-read again.
