@@ -33,6 +33,28 @@ object WorkshopSearch {
         return Regex("""filedetails/\?id=(\d{6,})""").findAll(part).map { it.groupValues[1] }.filter { it != id }.distinct().toList()
     }
 
+    /** Satu halaman hasil Workshop: ID item (urut) dan jumlah total item (0 = tidak diketahui). */
+    data class Page(val ids: List<String>, val total: Int)
+
+    /**
+     * Halaman Workshop (30 item): pencarian nama ([query] tidak kosong) atau daftar populer
+     * selama [days] hari terakhir ([days] = -1 → sepanjang masa). [tag] mis. "Build 42".
+     */
+    fun browse(appId: Int, query: String?, days: Int, page: Int, tag: String? = null): Page {
+        val sb = StringBuilder("https://steamcommunity.com/workshop/browse/?appid=$appId&section=readytouseitems&numperpage=30&p=$page")
+        if (!query.isNullOrBlank()) {
+            sb.append("&searchtext=").append(URLEncoder.encode(query.trim(), "UTF-8"))
+            sb.append("&browsesort=textsearch&actualsort=textsearch")
+        } else {
+            sb.append("&browsesort=trend&actualsort=trend&days=").append(days)
+        }
+        if (!tag.isNullOrBlank()) sb.append("&requiredtags%5B%5D=").append(URLEncoder.encode(tag, "UTF-8"))
+        val html = get(sb.toString())
+        val ids = Regex("""sharedfiles/filedetails/\?id=(\d{6,})""").findAll(html).map { it.groupValues[1] }.distinct().take(30).toList()
+        val total = Regex("""of ([\d,.]+) entries""").find(html)?.groupValues?.get(1)?.replace(",", "")?.replace(".", "")?.toIntOrNull() ?: 0
+        return Page(ids, total)
+    }
+
     fun search(appId: Int, query: String, max: Int = 5): List<String> {
         val q = query.trim()
         if (q.isEmpty()) return emptyList()

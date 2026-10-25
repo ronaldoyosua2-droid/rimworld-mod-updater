@@ -1,1 +1,5 @@
-- 🕒 **last_update is kept:** a mod's last-update date and file count are no longer reset to `never` when its folder is added or re-read again.
+- 🔎 **Search, filter and sort your mods:** one compact row above the list. Type in `> grep:` to find a mod by name, folder or Workshop ID; tap **⇅** to filter by status (ALL / ERROR / UPDATE / OK / NEW) and sort by status, name, last update, Workshop update date, size or recently added. Your choice is remembered.
+- 🔥 **Popular mods in [+] INSTALL:** browse the most popular mods of the last week, month, 3 months, 6 months, year or all time (B42-only filter for Project Zomboid), 30 per page with `◀ 1 2 3 … ▶` page buttons. Name search is paged too.
+- ↗ **See details before installing:** tap a mod's name or picture in [+] INSTALL to open its Steam Workshop page.
+- 🧭 **Mods without an ID:** tapping the title now also opens a Workshop search for that name.
+- 🌐 **Open Steam Workshop** from the ☰ menu, for the game you have selected.

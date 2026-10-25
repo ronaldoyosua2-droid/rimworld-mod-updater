@@ -59,6 +59,94 @@ class MainActivity : AppCompatActivity() {
     private lateinit var steamStatus: TextView
     private lateinit var summaryText: TextView
     private lateinit var drawerOutput: TextView
+    private lateinit var grepInput: EditText
+    private lateinit var viewButton: TextView
+    private var filterQuery = ""
+    private val uiPrefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+    /** Filter status: all / error / update / ok / new. */
+    private var filterKind: String
+        get() = uiPrefs.getString("filterKind", "all") ?: "all"
+        set(v) = uiPrefs.edit().putString("filterKind", v).apply()
+    /** Urutan: status / nameAsc / nameDesc / lastUpd / wsUpd / size / added. */
+    private var sortMode: String
+        get() = uiPrefs.getString("sortMode", "status") ?: "status"
+        set(v) = uiPrefs.edit().putString("sortMode", v).apply()
+
+    private fun kindOf(m: ModEntry) = when {
+        StatusKind.isFailed(m.status) -> "error"
+        m.updateAvailable -> "update"
+        StatusKind.isOk(m.status) -> "ok"
+        else -> "other"
+    }
+
+    private fun matchesKind(m: ModEntry, k: String) = when (k) {
+        "all" -> true
+        "new" -> m.isNew
+        else -> kindOf(m) == k
+    }
+
+    private val kindLabels get() = listOf("all" to "ALL", "error" to "✗ ERROR", "update" to "!! UPDATE", "ok" to "✓ OK", "new" to "NEW")
+    private val sortLabels get() = listOf(
+        "status" to tr("status — merah dulu", "status — red first"),
+        "nameAsc" to "name A → Z",
+        "nameDesc" to "name Z → A",
+        "lastUpd" to tr("last update (app) — terbaru dulu", "last update (app) — newest first"),
+        "wsUpd" to tr("workshop updated — terbaru dulu", "workshop updated — newest first"),
+        "size" to tr("size — terbesar dulu", "size — largest first"),
+        "added" to tr("baru ditambahkan — terbaru dulu", "recently added — newest first"),
+    )
+    private fun sortShort(m: String) = when (m) {
+        "status" -> "status"; "nameAsc" -> "name"; "nameDesc" -> "name ↓"; "lastUpd" -> "last upd"
+        "wsUpd" -> "workshop"; "size" -> "size"; else -> "added"
+    }
+
+    /** Menu ⇅: filter status + urutan dalam satu jendela. */
+    private fun showViewMenu() {
+        var k = filterKind
+        var srt = sortMode
+        val all = visible
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val chipRow = com.google.android.flexbox.FlexboxLayout(this).apply { flexWrap = com.google.android.flexbox.FlexWrap.WRAP }
+        val opts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun render() {
+            chipRow.removeAllViews()
+            kindLabels.forEach { (key, label) ->
+                val n = all.count { matchesKind(it, key) }
+                val c = when (key) { "error" -> Hx.RED; "update" -> Hx.AMBER; else -> Hx.GREEN }
+                chipRow.addView(TextView(this).apply {
+                    text = "$label $n"
+                    textSize = 9.5f
+                    typeface = Hx.MONO
+                    setTextColor(if (k == key) Hx.BRIGHT else c)
+                    background = boxBg(if (k == key) 0x3339FF88 else 0x00000000, c, 10)
+                    setPadding(px(8), px(4), px(8), px(4))
+                    setOnClickListener { k = key; render() }
+                    layoutParams = ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, px(5), px(5), 0) }
+                })
+            }
+            opts.removeAllViews()
+            sortLabels.forEach { (key, label) ->
+                val on = srt == key
+                opts.addView(term((if (on) "( • ) " else "(   ) ") + label, 11f, if (on) Hx.BRIGHT else Hx.GREEN, bold = on).apply {
+                    background = boxBg(if (on) Hx.DARK else 0x00000000, if (on) Hx.GREEN else Hx.DARK, 4)
+                    setPadding(px(9), px(7), px(9), px(7))
+                    setOnClickListener { srt = key; render() }
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(5) }
+                })
+            }
+        }
+        box.addView(term("filter:", 10.5f, Hx.DIM))
+        box.addView(chipRow)
+        box.addView(term("sort:", 10.5f, Hx.DIM).apply { setPadding(0, px(10), 0, 0) })
+        box.addView(opts)
+        render()
+        CmdDialog(this)
+            .setTitle("view --mods")
+            .setView(box)
+            .setNeutralButton("RESET") { _, _ -> filterKind = "all"; sortMode = "status"; grepInput.setText(""); renderList() }
+            .setPositiveButton("OK") { _, _ -> filterKind = k; sortMode = srt; renderList() }
+            .show()
+    }
     /** Proses panjang yang sedang berjalan (bisa dibatalkan dari notifikasi). */
     private var currentJob: Job? = null
     private var askedNotif = false
@@ -345,6 +433,38 @@ class MainActivity : AppCompatActivity() {
         })
 
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // satu baris: cari (grep) + tombol ⇅ (filter & urutan)
+        grepInput = EditText(this).apply {
+            hint = tr("> grep: nama / folder / id…", "> grep: name / folder / id…")
+            textSize = 12f
+            typeface = Hx.MONO
+            setTextColor(Hx.BRIGHT)
+            setHintTextColor(Hx.DIM)
+            setSingleLine()
+            background = boxBg(Hx.CARD, Hx.GREEN)
+            setPadding(px(10), px(8), px(10), px(8))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+                override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+                override fun afterTextChanged(e: android.text.Editable?) {
+                    filterQuery = e?.toString()?.trim().orEmpty()
+                    renderList()
+                }
+            })
+        }
+        viewButton = term("", 11.5f, Hx.BRIGHT).apply {
+            background = boxBg(0x00000000, Hx.GREEN)
+            setPadding(px(10), px(8), px(10), px(8))
+            gravity = Gravity.CENTER
+            setOnClickListener { showViewMenu() }
+        }
+        content.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, px(2), 0, px(6))
+            addView(grepInput, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(viewButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = px(6) })
+        })
         content.addView(ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             addView(listContainer)
@@ -364,6 +484,15 @@ class MainActivity : AppCompatActivity() {
             })
             addView(gameList)
             addView(View(this@MainActivity), LinearLayout.LayoutParams(1, 0, 1f))
+            addView(term("> open Steam Workshop ↗", 11f, Hx.GREEN).apply {
+                setPadding(0, px(10), 0, px(4))
+                setOnClickListener {
+                    drawer.closeDrawers()
+                    openUrl(if (game == Game.ZOMBOID)
+                        "https://steamcommunity.com/workshop/browse/?appid=108600&browsesort=trend&section=readytouseitems&requiredtags%5B%5D=Build+42"
+                    else "https://steamcommunity.com/workshop/browse/?appid=${game.appId}&browsesort=trend&section=readytouseitems")
+                }
+            })
             drawerOutput = term("> set output_dir", 11f, Hx.GREEN).apply {
                 setPadding(0, px(10), 0, px(10))
                 setOnClickListener {
@@ -690,8 +819,37 @@ class MainActivity : AppCompatActivity() {
         renderSummary()
         lastRender = android.os.SystemClock.uptimeMillis()
         listContainer.removeAllViews()
-        // urutan: merah (gagal / ID belum ketemu) → kuning (ada update) → lainnya
-        val list = visible.sortedBy { severity(it) }
+        // tombol ⇅ menampilkan filter & urutan aktif
+        val fk = filterKind
+        val sm = sortMode
+        viewButton.text = "⇅ " + (if (fk == "all") "" else kindLabels.first { it.first == fk }.second.removePrefix("✗ ").removePrefix("!! ").removePrefix("✓ ") + " · ") + sortShort(sm)
+        val q = filterQuery.lowercase()
+        val order = visible.withIndex().associate { it.value to it.index }
+        val list = visible
+            .filter { matchesKind(it, fk) }
+            .filter { q.isEmpty() || it.displayName.lowercase().contains(q) || it.name.lowercase().contains(q) ||
+                it.subPath.lowercase().contains(q) || it.workshopId.contains(q) || (it.remoteTitle?.lowercase()?.contains(q) == true) }
+            .let { l ->
+                when (sm) {
+                    "nameAsc" -> l.sortedBy { it.displayName.lowercase() }
+                    "nameDesc" -> l.sortedByDescending { it.displayName.lowercase() }
+                    "lastUpd" -> l.sortedByDescending { it.lastUpdated }
+                    "wsUpd" -> l.sortedByDescending { it.remoteTime }
+                    "size" -> l.sortedByDescending { it.remoteSize }
+                    "added" -> l.sortedByDescending { order[it] ?: 0 }
+                    // bawaan: merah (gagal / ID belum ketemu) → kuning (ada update) → lainnya
+                    else -> l.sortedBy { severity(it) }
+                }
+            }
+        if (list.isEmpty() && visible.isNotEmpty()) {
+            listContainer.addView(term(tr("> 0 mod cocok", "> 0 mods match") + (if (q.isNotEmpty()) " \"$filterQuery\"" else "") + "\n\n[ " + tr("hapus filter", "clear filter") + " ]", 11.5f, Hx.DIM).apply {
+                gravity = Gravity.CENTER
+                setPadding(px(10), px(24), px(10), px(24))
+                background = boxBg(0x00000000, Hx.DARK)
+                setOnClickListener { filterKind = "all"; grepInput.setText(""); renderList() }
+            })
+            return
+        }
         val anim = animateList
         animateList = false
         if (list.isEmpty()) {
@@ -749,7 +907,11 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(term(m.displayName + (if (m.isNew) "  [NEW]" else "") + "  ⧉", 14f, Hx.BRIGHT, bold = true).apply {
             // ketuk = salin nama, tekan lama = menu (salin folder, cari di Workshop, buka halaman)
-            setOnClickListener { copyText(m.displayName, tr("Nama mod", "Mod name")) }
+            setOnClickListener {
+                copyText(m.displayName, tr("Nama mod", "Mod name"))
+                // belum punya ID: langsung buka pencarian Workshop dengan nama mod ini
+                if (m.workshopId.isBlank()) openUrl(workshopSearchUrl(m.displayName))
+            }
             setOnLongClickListener { modMenu(m); true }
         })
         val src = when (m.sourceType) {
@@ -1471,7 +1633,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Pencarian mod Workshop di dalam aplikasi, lalu INSTALL langsung ke folder mod. */
+    /** Pencarian mod Workshop di dalam aplikasi (nama, atau populer per periode), 30 per halaman. */
     private fun showInstallSearch() {
         if (busy) return
         val input = EditText(this).apply {
@@ -1480,40 +1642,117 @@ class MainActivity : AppCompatActivity() {
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
             setSingleLine()
         }
-        val info = term("", 10f, Hx.DIM)
+        // state: query kosong → mode populer
+        var query = ""
+        var days = 30
+        var page = 1
+        var b42 = game == Game.ZOMBOID
+        var totalPages = 1
+        val periods = listOf(7 to tr("1 minggu", "1 week"), 30 to tr("1 bulan", "1 month"), 90 to tr("3 bulan", "3 months"),
+            180 to tr("6 bulan", "6 months"), 365 to tr("1 tahun", "1 year"), -1 to tr("sepanjang masa", "all time"))
+        val chips = com.google.android.flexbox.FlexboxLayout(this).apply {
+            flexWrap = com.google.android.flexbox.FlexWrap.WRAP
+        }
+        val info = term("", 10f, Hx.DIM).apply { setPadding(0, px(6), 0, 0) }
         val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val pager = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, px(10), 0, px(4)) }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(input)
-            addView(info)
-            addView(results)
+            addView(input); addView(chips); addView(info); addView(results); addView(pager)
+        }
+        fun chip(text: String, on: Boolean, amber: Boolean = false, click: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 9.5f
+            typeface = Hx.MONO
+            val c = if (amber) Hx.AMBER else Hx.GREEN
+            setTextColor(if (on) Hx.BRIGHT else c)
+            background = boxBg(if (on) 0x3339FF88 else 0x00000000, c, 10)
+            setPadding(px(8), px(4), px(8), px(4))
+            setOnClickListener { click() }
+            layoutParams = ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, px(6), px(5), 0) }
+        }
+        lateinit var load: () -> Unit
+        fun renderChips() {
+            chips.removeAllViews()
+            chips.addView(term("🔥 " + tr("POPULER:", "POPULAR:"), 9.5f, Hx.GREEN).apply {
+                setPadding(0, px(10), px(6), 0)
+            })
+            periods.forEach { (d, label) ->
+                chips.addView(chip(label, query.isEmpty() && days == d) {
+                    query = ""; input.setText(""); days = d; page = 1; load()
+                })
+            }
+            if (game == Game.ZOMBOID) chips.addView(chip("B42 only " + if (b42) "✓" else "✗", b42, amber = true) {
+                b42 = !b42; page = 1; load()
+            })
+        }
+        fun renderPager() {
+            pager.removeAllViews()
+            if (totalPages <= 1) return
+            fun pbtn(label: String, target: Int, on: Boolean = false, enabled: Boolean = true) = TextView(this).apply {
+                text = label
+                textSize = 11f
+                typeface = Hx.MONO_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(if (on) Hx.ON_GREEN else Hx.GREEN)
+                background = boxBg(if (on) Hx.GREEN else 0x00000000, Hx.GREEN, 4)
+                setPadding(px(9), px(6), px(9), px(6))
+                alpha = if (enabled) 1f else 0.3f
+                if (enabled && !on) setOnClickListener { page = target; load() }
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(px(3), 0, px(3), 0) }
+            }
+            pager.addView(pbtn("◀", page - 1, enabled = page > 1))
+            val from = (page - 2).coerceAtLeast(1)
+            val to = (from + 4).coerceAtMost(totalPages)
+            for (p in from..to) pager.addView(pbtn("$p", p, on = p == page))
+            if (to < totalPages) pager.addView(term("…", 11f, Hx.DIM).apply { setPadding(px(3), 0, px(3), 0) })
+            pager.addView(pbtn("▶", page + 1, enabled = page < totalPages))
         }
         var dialog: android.app.Dialog? = null
-        fun doSearch() {
-            val q = input.text.toString().trim()
-            if (q.isEmpty()) return
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
-            info.text = tr("> mencari \"$q\"…", "> searching \"$q\"…")
+        load = {
+            renderChips()
             results.removeAllViews()
+            pager.removeAllViews()
+            val popular = query.isEmpty()
+            val periodName = periods.firstOrNull { it.first == days }?.second ?: ""
+            info.text = if (popular) tr("> memuat populer $periodName…", "> loading popular $periodName…") else tr("> mencari \"$query\"…", "> searching \"$query\"…")
+            (results.parent?.parent as? ScrollView)?.scrollTo(0, 0)
             lifecycleScope.launch {
-                val details = withContext(Dispatchers.IO) {
+                val res = withContext(Dispatchers.IO) {
                     try {
-                        val ids = WorkshopSearch.search(game.appId, q, 12)
-                        val d = WorkshopApi.getDetails(ids)
-                        ids.mapNotNull { d[it] }.filter { it.ok && (it.appId == 0 || it.appId == game.appId) }
+                        val pg = WorkshopSearch.browse(game.appId, query.ifBlank { null }, days, page, if (b42 && game == Game.ZOMBOID) "Build 42" else null)
+                        val d = WorkshopApi.getDetails(pg.ids)
+                        pg.total to pg.ids.mapNotNull { d[it] }.filter { it.ok && (it.appId == 0 || it.appId == game.appId) }
                     } catch (e: Exception) {
                         AppLog.w("Pencarian Workshop gagal: ${e.message}"); null
                     }
                 }
-                if (details == null) { info.text = tr("> gagal mencari. Cek internet.", "> search failed. Check your internet."); return@launch }
-                info.text = tr("> ${details.size} hasil · tekan INSTALL untuk memasang", "> ${details.size} results · tap INSTALL to install")
-                details.forEach { d -> results.addView(resultRow(d) { dialog?.dismiss(); confirmInstall(d) }) }
+                if (res == null) { info.text = tr("> gagal memuat. Cek internet.", "> couldn't load. Check your internet."); return@launch }
+                val (total, details) = res
+                totalPages = if (total > 0) (total + 29) / 30 else if (details.size >= 30) page + 1 else page
+                val first = (page - 1) * 30 + 1
+                val range = "#$first–${first + details.size - 1}"
+                info.text = when {
+                    details.isEmpty() -> tr("> tidak ada hasil", "> no results")
+                    popular -> tr("> populer $periodName · halaman $page ($range)", "> popular $periodName · page $page ($range)") + if (b42 && game == Game.ZOMBOID) " · B42" else ""
+                    else -> tr("> \"$query\" · halaman $page ($range)", "> \"$query\" · page $page ($range)")
+                }
+                details.forEachIndexed { k, d ->
+                    val rank = if (popular) "#${first + k} · " else ""
+                    results.addView(resultRow(d, rank) { dialog?.dismiss(); confirmInstall(d) })
+                }
+                renderPager()
             }
+        }
+        fun doSearch() {
+            query = input.text.toString().trim()
+            page = 1
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
+            load()
         }
         input.setOnEditorActionListener { _, _, _ -> doSearch(); true }
         dialog = CmdDialog(this)
             .setTitle("workshop_search --game ${game.key}")
-            .setMessage(tr("Cari mod di Steam Workshop, lalu pasang langsung ke folder mod-mu.", "Search Steam Workshop and install mods straight into your mod folder."))
             .setView(box)
             .setNeutralButton(tr("Tutup", "Close"), null)
             .setPositiveButton(tr("Cari", "Search")) { _, _ -> }
@@ -1527,10 +1766,11 @@ class MainActivity : AppCompatActivity() {
             }
             dialog.window?.decorView?.let { find(it) }?.setOnClickListener { doSearch() }
         }
-        input.requestFocus()
+        load() // awal: populer 1 bulan
     }
 
-    private fun resultRow(d: WorkshopApi.Details, onInstall: () -> Unit): View {
+    private fun resultRow(d: WorkshopApi.Details, rank: String = "", onInstall: () -> Unit): View {
+        val openPage = { openUrl("https://steamcommunity.com/sharedfiles/filedetails/?id=${d.id}") }
         val installed = isInstalled(d.id)
         val build = if (game == Game.ZOMBOID) d.pzBuild else null
         val b41Only = build == "B41"
@@ -1540,6 +1780,7 @@ class MainActivity : AppCompatActivity() {
             clipToOutline = true
         }
         d.previewUrl?.let { loadThumb(it, thumb) }
+        thumb.setOnClickListener { openPage() }
         val meta = buildString {
             if (build != null) append("[$build] ")
             if (d.fileSize > 0) append(fmtSize(d.fileSize)).append(" · ")
@@ -1581,8 +1822,10 @@ class MainActivity : AppCompatActivity() {
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(px(8), 0, px(6), 0)
-                addView(term(d.title ?: d.id, 11.5f, Hx.BRIGHT, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                addView(term(rank + (d.title ?: d.id) + " ↗", 11.5f, Hx.BRIGHT, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
                 addView(term(meta, 9.5f, Hx.DIM))
+                // ketuk nama → halaman detail di Steam Workshop
+                setOnClickListener { openPage() }
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(btn)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(6) }
