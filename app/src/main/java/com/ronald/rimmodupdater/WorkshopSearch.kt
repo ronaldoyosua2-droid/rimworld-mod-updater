@@ -12,7 +12,7 @@ object WorkshopSearch {
         return try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 20_000
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) SteamodUpdater")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) ModSyncUpdate")
             conn.setRequestProperty("Accept-Language", "en-US,en;q=0.8")
             if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
             conn.inputStream.bufferedReader().use { it.readText() }
@@ -65,7 +65,7 @@ object WorkshopSearch {
         return try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 20_000
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) SteamodUpdater")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) ModSyncUpdate")
             conn.setRequestProperty("Accept-Language", "en-US,en;q=0.8")
             if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
             val html = conn.inputStream.bufferedReader().use { it.readText() }

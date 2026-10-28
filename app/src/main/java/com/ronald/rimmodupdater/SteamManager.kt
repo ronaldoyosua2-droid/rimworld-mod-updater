@@ -13,6 +13,7 @@ import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesAuthSteamclie
 import `in`.dragonbra.javasteam.steam.authentication.AuthenticationException
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.License
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.callback.LicenseListCallback
+import `in`.dragonbra.javasteam.steam.handlers.steamuser.AnonymousLogOnDetails
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.LogOnDetails
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.SteamUser
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.LoggedOffCallback
@@ -48,6 +49,8 @@ object SteamManager {
     @Volatile var loggedIn = false
         private set
     @Volatile var accountName: String? = null
+    /** true = sesi anonymous (tanpa akun). */
+    @Volatile var anonymous = false
         private set
     private var licenses: List<License> = emptyList()
 
@@ -180,12 +183,40 @@ object SteamManager {
         return result
     }
 
-    /** Login pakai token tersimpan. Kalau gagal / belum ada token → LoginRequired. */
-    suspend fun ensureLoggedIn(ctx: Context) = withContext(Dispatchers.IO) {
-        if (loggedIn && client?.isConnected == true) return@withContext
+    /** Login anonymous (seperti SteamCMD "login anonymous"): tanpa akun, cukup ID mod. */
+    private suspend fun logOnAnonymous(): EResult {
+        val logon = CompletableDeferred<EResult>()
+        val lic = CompletableDeferred<List<License>>()
+        logonSignal = logon
+        licenseSignal = lic
+        user!!.logOnAnonymous(AnonymousLogOnDetails())
+        val result = withTimeout(30_000) { logon.await() }
+        AppLog.i("Logon Steam anonymous: $result")
+        if (result == EResult.OK) {
+            // daftar lisensi anonymous kadang tidak dikirim; jangan menunggu lama
+            try { withTimeout(6_000) { lic.await() } } catch (_: Exception) {}
+            loggedIn = true
+            anonymous = true
+            accountName = null
+        }
+        return result
+    }
+
+    /**
+     * Pastikan tersambung: pakai akun kalau ada token tersimpan, kalau tidak → anonymous.
+     * [forceAccount] = true → wajib akun (dipakai kalau anonymous ditolak untuk mod tertentu).
+     */
+    suspend fun ensureLoggedIn(ctx: Context, forceAccount: Boolean = false) = withContext(Dispatchers.IO) {
+        if (loggedIn && client?.isConnected == true && !(forceAccount && anonymous)) return@withContext
         val account = prefs(ctx).getString("account", null)
         val token = prefs(ctx).getString("token", null)
-        if (account == null || token == null) throw LoginRequired()
+        if (account == null || token == null) {
+            if (forceAccount) throw LoginRequired()
+            connect()
+            if (logOnAnonymous() != EResult.OK) throw LoginRequired()
+            return@withContext
+        }
+        if (anonymous) dropSession()
         connect()
         val result = logOn(account, token)
         if (result != EResult.OK) {
@@ -230,12 +261,13 @@ object SteamManager {
      */
     suspend fun loginWithPassword(ctx: Context, username: String, password: String, ui: LoginUi) =
         withContext(Dispatchers.IO) {
+            if (anonymous) dropSession() // ganti dari sesi anonymous ke akun
             connect()
             val details = AuthSessionDetails().apply {
                 this.username = username
                 this.password = password
                 persistentSession = true
-                deviceFriendlyName = "Steamod Updater (Android)"
+                deviceFriendlyName = "ModSync Update (Android)"
                 authenticator = null // verifikasi ditangani sendiri di bawah
             }
             val session = withReconnect("Mulai login") {
@@ -316,7 +348,18 @@ object SteamManager {
                 .apply()
         }
 
+    /** Putuskan sesi sekarang (dipakai saat pindah anonymous → akun). */
+    private fun dropSession() {
+        try { user?.logOff() } catch (_: Exception) {}
+        try { client?.disconnect() } catch (_: Exception) {}
+        loggedIn = false
+        anonymous = false
+        accountName = null
+        licenses = emptyList()
+    }
+
     fun logout(ctx: Context) {
+        anonymous = false
         prefs(ctx).edit().clear().apply()
         try {
             user?.logOff()

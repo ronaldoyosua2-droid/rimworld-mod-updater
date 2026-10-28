@@ -24,16 +24,15 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"$buildTime WIB\"")
     }
 
-    // Kunci tanda tangan tetap, supaya build baru bisa meng-update aplikasi yang sudah terpasang.
-    val signProps = Properties().apply {
-        rootProject.file("signing/keystore.properties").inputStream().use { load(it) }
-    }
+    // Kunci tanda tangan: file terenkripsi di repo (signing/release.jks.enc) dibuka oleh GitHub Actions
+    // memakai secret SIGNING_PASS. Password tidak pernah disimpan di repo.
+    val signPass = System.getenv("SIGNING_PASS")
     signingConfigs {
         create("fixed") {
             storeFile = rootProject.file("signing/release.jks")
-            storePassword = signProps.getProperty("storePassword")
-            keyAlias = signProps.getProperty("keyAlias")
-            keyPassword = signProps.getProperty("keyPassword")
+            storePassword = signPass
+            keyAlias = "modsync"
+            keyPassword = signPass
         }
     }
 

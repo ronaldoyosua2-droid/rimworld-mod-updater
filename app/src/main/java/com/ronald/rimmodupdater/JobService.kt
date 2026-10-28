@@ -74,7 +74,7 @@ class JobService : Service() {
         }
         if (wake == null) {
             wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "steamod:job").apply {
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "modsync:job").apply {
                     setReferenceCounted(false)
                     acquire(3 * 60 * 60 * 1000L) // batas aman 3 jam
                 }
@@ -96,7 +96,7 @@ class JobService : Service() {
         )
         val b = Notification.Builder(this, CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(JobState.title.ifBlank { "Steamod Updater" })
+            .setContentTitle(JobState.title.ifBlank { "ModSync Update" })
             .setContentText(JobState.text.lineSequence().firstOrNull() ?: "")
             .setStyle(Notification.BigTextStyle().bigText(JobState.text))
             .setContentIntent(open)

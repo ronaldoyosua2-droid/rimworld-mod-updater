@@ -113,7 +113,7 @@ class CmdDialog(private val ctx: Context) {
             elevation = px(12).toFloat()
         }
 
-        // bilah jendela: ● ● ●  root@steamod:~
+        // bilah jendela: ● ● ●  root@modsync:~
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -123,7 +123,7 @@ class CmdDialog(private val ctx: Context) {
                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor(c)) }
                 }, LinearLayout.LayoutParams(px(9), px(9)).apply { rightMargin = px(6) })
             }
-            addView(tv("  root@steamod:~", 11f, Hx.DIM))
+            addView(tv("  root@modsync:~", 11f, Hx.DIM))
         }
         root.addView(bar)
         root.addView(View(ctx).apply { setBackgroundColor(Hx.DARK) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(1)))

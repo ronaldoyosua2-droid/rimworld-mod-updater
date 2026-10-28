@@ -7,3 +7,5 @@
 - **Aturan YES:** setiap perubahan aplikasi (fitur baru, perubahan tampilan, DAN perbaikan bug) baru boleh dikerjakan/di-push setelah pemilik membalas persis `YES` (huruf besar semua, tanpa typo; `yes`/`Yes`/`yed` tidak dihitung).
   - Perubahan tampilan: kirim gambar mockup dulu.
   - Perbaikan bug: jelaskan dulu penyebab dan rencana perbaikannya.
+- Nama aplikasi: **ModSync Update**. Lisensi: All rights reserved (LICENSE). Logo: `docs/banner.png`, ikon `res/mipmap-*/ic_launcher.png`, layar pembuka `res/drawable-nodpi/splash.jpg`.
+- Tanda tangan APK: `signing/release.jks.enc` (AES-256, pbkdf2 200000) dibuka di CI dengan secret `SIGNING_PASS`, alias `modsync`. Jangan pernah commit keystore/password asli.

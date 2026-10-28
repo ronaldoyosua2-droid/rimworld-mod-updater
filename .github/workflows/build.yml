@@ -23,7 +23,19 @@ jobs:
         with:
           gradle-version: 8.14.3
 
+      - name: Decrypt signing key
+        env:
+          SIGNING_PASS: ${{ secrets.SIGNING_PASS }}
+        run: |
+          if [ -z "$SIGNING_PASS" ]; then
+            echo "::error::Secret SIGNING_PASS belum diisi (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/release.jks.enc -out signing/release.jks -pass env:SIGNING_PASS
+
       - name: Build APK
+        env:
+          SIGNING_PASS: ${{ secrets.SIGNING_PASS }}
         run: |
           set -o pipefail
           gradle :app:assembleRelease --console=plain 2>&1 | tee build.log
@@ -34,13 +46,17 @@ jobs:
             echo "::error::${line}"
           done
 
+      - name: Remove decrypted key
+        if: always()
+        run: rm -f signing/release.jks
+
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk SteamodUpdater.apk
+        run: cp app/build/outputs/apk/release/app-release.apk ModSyncUpdate.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SteamodUpdater
-          path: SteamodUpdater.apk
+          name: ModSyncUpdate
+          path: ModSyncUpdate.apk
 
       - name: Release notes
         run: |
@@ -60,7 +76,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Steamod Updater (build ${{ github.run_number }})
+          name: ModSync Update (build ${{ github.run_number }})
           body_path: release_notes.md
           make_latest: true
-          files: SteamodUpdater.apk
+          files: ModSyncUpdate.apk

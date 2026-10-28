@@ -1,10 +1,9 @@
-# RimMod Updater
+<p align="center"><img src="docs/banner.png" width="420" alt="ModSync Update"></p>
 
-Aplikasi Android untuk mengecek dan meng-update mod RimWorld dari Steam Workshop.
+# ModSync Update
 
-1. Tambahkan mod lama (folder, folder Mods, atau file zip) atau tempel link Workshop.
-2. Tekan **Cek update**: app membandingkan tanggal mod-mu dengan tanggal update di Workshop.
-3. Tekan **Update**: app login ke Steam (akun yang punya RimWorld), download versi terbaru,
-   lalu mengganti folder/zip lama dengan yang baru.
+Android app that checks and updates Steam Workshop mods right on your phone, for **RimWorld** (RimDroid) and **Project Zomboid B42** (Zomdroid). Download only what changed, find Workshop IDs automatically, install new mods, all with a terminal-style interface.
 
-APK terbaru ada di halaman **Releases**.
+📥 Download the official APK only from the **[Releases](../../releases/latest)** page.
+
+© 2026 Ronald. All rights reserved. See [LICENSE](LICENSE). Not affiliated with Valve or Steam.

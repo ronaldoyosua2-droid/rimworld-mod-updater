@@ -184,8 +184,8 @@ class MainActivity : AppCompatActivity() {
             CmdDialog(this)
                 .setTitle(tr("Biar proses tidak terputus", "Keep tasks running"))
                 .setMessage(tr(
-                    "Supaya update tetap jalan saat kamu pindah aplikasi, izinkan Steamod Updater berjalan tanpa batasan baterai.\nDi Xiaomi: Penghemat baterai → Tanpa batasan.",
-                    "So updates keep running when you switch apps, allow Steamod Updater to run without battery restrictions.\nOn Xiaomi: Battery saver → No restrictions."))
+                    "Supaya update tetap jalan saat kamu pindah aplikasi, izinkan ModSync Update berjalan tanpa batasan baterai.\nDi Xiaomi: Penghemat baterai → Tanpa batasan.",
+                    "So updates keep running when you switch apps, allow ModSync Update to run without battery restrictions.\nOn Xiaomi: Battery saver → No restrictions."))
                 .setPositiveButton(tr("Buka setelan", "Open settings")) { _, _ ->
                     try {
                         startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
@@ -350,7 +350,7 @@ class MainActivity : AppCompatActivity() {
             background = boxBg(0x1039FF88, Hx.DIM)
             setOnClickListener { drawer.openDrawer(Gravity.START) }
         }
-        titleView = term("STEAMOD_UPDATER", 19f, Hx.GREEN, bold = true).apply {
+        titleView = term("MODSYNC_UPDATE", 19f, Hx.GREEN, bold = true).apply {
             letterSpacing = 0.06f
             Hx.glow(this, pulse = true)
         }
@@ -551,9 +551,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Animasi pembuka: judul "dekripsi", header di-render garis, teks prompt diketik, kursor berkedip. */
+    /** Layar pembuka: logo ModSync tampil sebentar lalu memudar (hanya saat aplikasi baru dibuka). */
+    private var splashShown = false
+
+    private fun showSplash() {
+        if (splashShown) return
+        splashShown = true
+        val root = window.decorView as ViewGroup
+        val splash = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(Hx.BG)
+            isClickable = true
+            addView(android.widget.ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.splash)
+                adjustViewBounds = true
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            }, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
+                setMargins(px(24), 0, px(24), 0)
+            })
+            addView(term("© 2026 Ronald · All rights reserved", 10f, Hx.DIM).apply { gravity = Gravity.CENTER },
+                android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
+                    bottomMargin = px(48)
+                })
+        }
+        root.addView(splash, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        splash.postDelayed({
+            splash.animate().alpha(0f).setDuration(450).withEndAction { root.removeView(splash) }.start()
+        }, 1300)
+    }
+
     private fun bootAnimation() {
+        showSplash()
         headerReveal.reveal(0, 500)
-        Decrypt.run(titleView, "STEAMOD_UPDATER", 800)
+        Decrypt.run(titleView, "MODSYNC_UPDATE", 800)
         val prompt = "build ${BuildConfig.VERSION_CODE} · root@android:~$ "
         var i = 0
         val type = object : Runnable {
@@ -750,7 +779,7 @@ class MainActivity : AppCompatActivity() {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Log Steamod Updater ${AppLog.buildLabel}")
+                putExtra(Intent.EXTRA_SUBJECT, "Log ModSync Update ${AppLog.buildLabel}")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(send, tr("Kirim log ke…", "Send log to…")))
@@ -1939,7 +1968,8 @@ class MainActivity : AppCompatActivity() {
                     states[i] = name to ProgressPanel.ItemState.DONE
                     panel.log("DONE", "$name → ${written.joinToString()}", "✓")
                 } catch (e: Exception) {
-                    AppLog.e("Install ${d.id} gagal", e)
+                    AppLog.e("Install ${d.id} gagal" + if (SteamManager.anonymous) " (anonymous)" else "", e)
+                    if (SteamManager.anonymous) toast(tr("Install gagal dalam mode anonymous. Tekan LOGIN lalu coba lagi.", "Install failed in anonymous mode. Tap LOGIN and try again."))
                     states[i] = name to ProgressPanel.ItemState.FAILED
                     panel.log("FAIL", "$name: ${e.message}", error = true)
                 }
@@ -2248,7 +2278,8 @@ class MainActivity : AppCompatActivity() {
                     panel.log("FAIL", tr("${m.displayName}: perlu login lagi", "${m.displayName}: login needed again"), error = true)
                 } catch (e: Exception) {
                     AppLog.e("Update ${m.workshopId} (${m.displayName}) gagal", e)
-                    m.status = tr("Gagal: ${e.message ?: e.javaClass.simpleName}", "Failed: ${e.message ?: e.javaClass.simpleName}")
+                    val hint = if (SteamManager.anonymous) tr(" · mode anonymous mungkin ditolak, tekan LOGIN lalu coba lagi", " · anonymous mode may be refused, tap LOGIN and try again") else ""
+                    m.status = tr("Gagal: ${e.message ?: e.javaClass.simpleName}", "Failed: ${e.message ?: e.javaClass.simpleName}") + hint
                     states[i] = m.displayName to ProgressPanel.ItemState.FAILED
                     panel.log("FAIL", "${m.displayName}: ${e.message}", error = true)
                 }
@@ -2481,7 +2512,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshSteamStatus() {
         val acc = SteamManager.accountName ?: SteamManager.savedAccount(this)
-        if (acc != null) {
+        if (acc == null && SteamManager.anonymous && SteamManager.loggedIn) {
+            val t = android.text.SpannableStringBuilder("> steam_session: ")
+            val st = t.length
+            t.append("anonymous ● ONLINE")
+            t.setSpan(android.text.style.ForegroundColorSpan(Hx.GREEN), st, t.length, 0)
+            t.setSpan(android.text.style.StyleSpan(Typeface.BOLD), st, t.length, 0)
+            steamStatus.text = t
+            steamButton.text = "LOGIN"
+        } else if (acc != null) {
             val on = SteamManager.loggedIn
             val t = android.text.SpannableStringBuilder("> steam_session: ")
             val st = t.length
@@ -2491,20 +2530,20 @@ class MainActivity : AppCompatActivity() {
             steamStatus.text = t
             steamButton.text = "LOGOUT"
         } else {
-            steamStatus.text = "> steam_session: NONE\n  " + tr("(perlu login untuk download)", "(login needed to download)")
+            steamStatus.text = "> steam_session: anonymous\n  " + tr("(tanpa login · LOGIN = pakai akun)", "(no login needed · LOGIN = use account)")
             steamButton.text = "LOGIN"
         }
     }
 
     private fun onSteamButton() {
-        if (SteamManager.savedAccount(this) != null || SteamManager.loggedIn) {
+        if (SteamManager.savedAccount(this) != null || (SteamManager.loggedIn && !SteamManager.anonymous)) {
             SteamManager.logout(this)
             refreshSteamStatus()
             toast(tr("Sudah logout", "Logged out"))
         } else {
             job {
                 setBusy(true, tr("Login Steam…", "Steam login…"))
-                ensureSteam()
+                ensureSteam(forceAccount = true)
                 setBusy(false)
                 refreshSteamStatus()
             }
@@ -2512,9 +2551,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Pastikan sudah login. Menampilkan dialog login kalau perlu. */
-    private suspend fun ensureSteam(): Boolean {
+    private suspend fun ensureSteam(forceAccount: Boolean = false): Boolean {
         try {
-            SteamManager.ensureLoggedIn(this)
+            SteamManager.ensureLoggedIn(this, forceAccount)
             return true
         } catch (_: SteamManager.LoginRequired) {
         } catch (e: Exception) {
@@ -2604,11 +2643,11 @@ class MainActivity : AppCompatActivity() {
             b.setTitle(tr("Setujui di aplikasi Steam", "Approve in the Steam app"))
                 .setMessage(
                     tr("1. Buka aplikasi Steam di HP-mu.\n" +
-                        "2. Tekan \"Approve / Setujui\" pada permintaan login \"Steamod Updater\".\n" +
+                        "2. Tekan \"Approve / Setujui\" pada permintaan login \"ModSync Update\".\n" +
                         "3. Kembali ke sini, lalu tekan tombol \"Sudah disetujui\".\n\n" +
                         "Tidak apa-apa kalau koneksi sempat putus saat kamu pindah aplikasi, nanti otomatis tersambung lagi.",
                         "1. Open the Steam app on your phone.\n" +
-                        "2. Tap \"Approve\" on the \"Steamod Updater\" sign-in request.\n" +
+                        "2. Tap \"Approve\" on the \"ModSync Update\" sign-in request.\n" +
                         "3. Come back here and tap \"I approved it\".\n\n" +
                         "It's fine if the connection drops while you switch apps; it reconnects automatically.")
                 )
