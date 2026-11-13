@@ -1,4 +1,1 @@
-- 🏷️ **New name: ModSync Update**, with a new logo, app icon and opening screen.
-- 👤 **Anonymous mode:** check, update and install mods **without logging in to Steam**, just like SteamCMD's anonymous login. The status shows `steam_session: anonymous`. If a mod is refused in anonymous mode, tap **LOGIN** to use your account instead.
-- 🔐 **New signing key, kept secret:** official APKs are now signed with a private key that is no longer stored in the repository, so nobody else can publish a fake "update". Because of this, **uninstall the old Steamod Updater once** before installing this version, then add your mod folders again.
-- 📄 The project is now **© Ronald, all rights reserved** (see LICENSE).
+- 🐞 **No more duplicate mod cards:** a mod added with **[+] LINK/ID** is now recorded as a normal folder mod once it is downloaded, so it no longer shows up twice after the folder is re-read. Existing duplicates (same Workshop ID listed as both "link" and "folder") are merged automatically, keeping the latest `last_update`.

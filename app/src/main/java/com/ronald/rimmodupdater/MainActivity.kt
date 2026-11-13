@@ -1540,6 +1540,44 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ check
 
+    // ------------------------------------------------------------------ mod "link" → mod folder
+
+    /** Ubah entri LINK/ID yang sudah di-download menjadi entri folder (1 folder → entri itu sendiri). */
+    private fun linkToFolder(m: ModEntry, rootUri: String, folders: List<String>) {
+        val zomboid = m.game == Game.ZOMBOID.key
+        folders.forEachIndexed { i, f ->
+            val e = if (i == 0) m else m.copy()
+            e.sourceType = "folder"
+            e.sourceUri = rootUri
+            e.subPath = f
+            e.contentPrefix = if (zomboid) "mods/$f/" else ""
+            if (folders.size > 1) e.name = f
+            if (i > 0) mods += e
+        }
+        AppLog.i("Mod link ${m.workshopId} dicatat sebagai folder: ${folders.joinToString()}")
+    }
+
+    /**
+     * Bersihkan dobel: entri LINK/ID yang ID Workshop-nya sama dengan mod folder di game yang sama
+     * digabung ke mod folder itu (catatan last_update dipindahkan), lalu entri link dibuang.
+     */
+    private fun mergeLinkDuplicates(): Int {
+        var n = 0
+        mods.filter { it.sourceType == "none" && it.workshopId.isNotBlank() }.forEach { link ->
+            val folder = mods.firstOrNull { it.game == link.game && it.sourceType == "folder" && it.workshopId == link.workshopId }
+                ?: return@forEach
+            if (link.lastUpdated > folder.lastUpdated) {
+                folder.lastUpdated = link.lastUpdated
+                folder.lastUpdatedFiles = link.lastUpdatedFiles
+            }
+            mods.remove(link)
+            n++
+            AppLog.i("Dobel digabung: ${link.displayName} (${link.workshopId}) link → folder ${folder.subPath}")
+        }
+        if (n > 0) store.save(mods)
+        return n
+    }
+
     // ------------------------------------------------------------------ baca ulang folder mod
 
     private var lastRescan = 0L
@@ -1556,6 +1594,7 @@ class MainActivity : AppCompatActivity() {
      */
     private suspend fun rescanFolders(): Pair<Int, Int> {
         lastRescan = System.currentTimeMillis()
+        if (mergeLinkDuplicates() > 0) renderList()
         val g = game
         val roots = mods.filter { it.game == g.key && it.sourceType == "folder" && it.sourceUri != null && it.subPath.isNotBlank() }
             .mapNotNull { it.sourceUri }.distinct()
@@ -1589,6 +1628,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 scanned.filter { it.subPath.isNotBlank() && it.subPath.lowercase() !in knownNames }.forEach { sm ->
+                    // folder ini hasil download LINK/ID? gabungkan ke entri itu, jangan buat kartu baru
+                    val link = sm.workshopId?.takeIf { it.isNotBlank() }?.let { id ->
+                        mods.firstOrNull { it.game == g.key && it.sourceType == "none" && it.workshopId == id }
+                    }
+                    if (link != null) {
+                        linkToFolder(link, root, listOf(sm.subPath))
+                        return@forEach
+                    }
                     mods += ModEntry(
                         workshopId = sm.workshopId ?: "",
                         name = sm.name,
@@ -1990,6 +2037,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkUpdates() {
+        mergeLinkDuplicates()
         if (busy) return
         val targets = visible.filter { it.workshopId.isNotBlank() }
         if (targets.isEmpty()) {
@@ -2268,7 +2316,11 @@ class MainActivity : AppCompatActivity() {
                 panel.badge("DOWNLOAD")
                 AppLog.i("Mulai update ${m.workshopId} (${m.displayName}), sumber=${m.sourceType}")
                 try {
-                    updateOne(m, { progress(it) }, onFraction = { f -> setFraction(f) })
+                    val written = mutableListOf<String>()
+                    val wasLink = m.sourceType == "none"
+                    updateOne(m, { progress(it) }, written = written, onFraction = { f -> setFraction(f) })
+                    // mod dari LINK/ID: setelah terpasang dicatat sebagai mod folder (supaya tidak muncul dobel)
+                    if (wasLink && written.isNotEmpty()) store.outputFor(game.key)?.let { root -> linkToFolder(m, root, written) }
                     ok++
                     states[i] = m.displayName to ProgressPanel.ItemState.DONE
                     panel.log("DONE", m.displayName, "✓")
