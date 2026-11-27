@@ -1,0 +1,16 @@
+name: PlayTime mod check
+
+on:
+  push:
+    branches: [ playtime ]
+
+jobs:
+  mod:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build mod
+        run: |
+          dotnet --version
+          dotnet build rimworld-mod/ModSyncPlayTime/Source/ModSyncPlayTime.csproj -c Release
+          ls -la rimworld-mod/ModSyncPlayTime/Assemblies
