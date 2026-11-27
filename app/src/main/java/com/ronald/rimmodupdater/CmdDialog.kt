@@ -31,6 +31,7 @@ class CmdDialog(private val ctx: Context) {
     private var title: CharSequence? = null
     private var message: CharSequence? = null
     private var view: View? = null
+    private var rawView = false
     private var items: Array<out CharSequence>? = null
     private var itemsListener: ((DialogInterface, Int) -> Unit)? = null
     private var single: Array<out CharSequence>? = null
@@ -45,6 +46,8 @@ class CmdDialog(private val ctx: Context) {
     fun setTitle(t: CharSequence?) = apply { title = t }
     fun setMessage(m: CharSequence?) = apply { message = m }
     fun setView(v: View?) = apply { view = v }
+    /** View yang sudah diberi warna sendiri: tidak diwarnai ulang oleh tema terminal. */
+    fun setRawView(v: View?) = apply { view = v; rawView = true }
     fun setItems(list: Array<out CharSequence>, l: (DialogInterface, Int) -> Unit) = apply { items = list; itemsListener = l }
     fun setSingleChoiceItems(list: Array<out CharSequence>, checked: Int, l: (DialogInterface, Int) -> Unit) =
         apply { single = list; singleChecked = checked; singleListener = l }
@@ -169,7 +172,7 @@ class CmdDialog(private val ctx: Context) {
         }
         view?.let { v ->
             (v.parent as? ViewGroup)?.removeView(v)
-            theme(v)
+            if (!rawView) theme(v)
             body.addView(v, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(6) })
         }
         if (items != null || single != null) body.addView(tv("> █", 12f, Hx.GREEN).apply { setPadding(0, px(8), 0, 0) })

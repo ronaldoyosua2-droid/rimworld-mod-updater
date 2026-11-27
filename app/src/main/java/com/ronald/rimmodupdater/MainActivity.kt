@@ -232,6 +232,14 @@ class MainActivity : AppCompatActivity() {
         afterOutputPicked = null
     }
 
+    private val pickSaves = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            persist(uri)
+            store.setSavesFor(game.key, uri.toString())
+            showPlayTime()
+        }
+    }
+
     // ------------------------------------------------------------------ lifecycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -501,6 +509,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             addView(drawerOutput)
+            addView(term("> played_time ⏱", 11f, Hx.GREEN).apply {
+                setPadding(0, px(6), 0, px(10))
+                setOnClickListener { drawer.closeDrawers(); showPlayTime() }
+            })
             drawerSettings = term("> settings · ${if (Lang.en) "EN" else "ID"}", 11f, Hx.GREEN).apply {
                 setPadding(0, px(6), 0, px(10))
                 setOnClickListener {
@@ -729,6 +741,197 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ log
+
+    // ------------------------------------------------------------------ played_time
+
+    private fun showPlayTime() {
+        if (game == Game.ZOMBOID) {
+            CmdDialog(this)
+                .setTitle("played_time · ZOMBOID")
+                .setMessage(tr("Untuk Zomboid menyusul. Sekarang baru RimWorld.", "Zomboid support is coming later. RimWorld only for now."))
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val savesTree = store.savesFor(game.key)
+        if (savesTree == null) {
+            CmdDialog(this)
+                .setTitle("played_time · RIMWORLD")
+                .setMessage(tr("Pilih folder Saves RimWorld di RimDroid (folder yang berisi file .rws).\n\nFile save hanya dibaca, tidak diubah.",
+                    "Choose RimDroid's RimWorld Saves folder (the folder with the .rws files).\n\nSave files are only read, never changed."))
+                .setNeutralButton(tr("Batal", "Cancel"), null)
+                .setPositiveButton(tr("Pilih folder", "Choose folder")) { _, _ -> pickSaves.launch(null) }
+                .show()
+            return
+        }
+        val loading = CmdDialog(this)
+            .setTitle("played_time · RIMWORLD")
+            .setMessage(tr("membaca save…", "reading saves…"))
+            .setCancelable(false)
+            .show()
+        val msgView = (loading.window?.decorView as? ViewGroup)?.let { findLast(it) }
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val list = PlayTime.readSaves(this@MainActivity, savesTree) { i, n ->
+                        msgView?.post { msgView.text = tr("> membaca save $i/$n…", "> reading save $i/$n…") }
+                    }
+                    Result.success(list to PlayTime.modInstalled(this@MainActivity, installRootUri()))
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+            loading.dismiss()
+            if (isFinishing) return@launch
+            result.onSuccess { (list, installed) -> playTimeDialog(savesTree, list, installed) }
+                .onFailure { e ->
+                    AppLog.e("played_time gagal baca folder Saves", e)
+                    CmdDialog(this@MainActivity)
+                        .setTitle("played_time · RIMWORLD")
+                        .setMessage(tr("Folder Saves tidak bisa dibaca (izin hilang / folder dipindah). Pilih ulang foldernya.",
+                            "Can't read the Saves folder (permission lost / folder moved). Choose it again.") + "\n\n" + (e.message ?: ""))
+                        .setNeutralButton(tr("Batal", "Cancel"), null)
+                        .setPositiveButton(tr("Pilih folder", "Choose folder")) { _, _ -> pickSaves.launch(null) }
+                        .show()
+                }
+        }
+    }
+
+    /** TextView terakhir di dalam [g] (baris pesan dialog loading). */
+    private fun findLast(g: ViewGroup): TextView? {
+        for (i in g.childCount - 1 downTo 0) {
+            val v = g.getChildAt(i)
+            if (v is ViewGroup) findLast(v)?.let { return it }
+            if (v is TextView && v !is android.widget.Button) return v
+        }
+        return null
+    }
+
+    private fun playTimeDialog(savesTree: String, saves: List<PlayTime.SaveInfo>, installed: Boolean) {
+        fun span(label: String, value: String, color: Int, note: String? = null) =
+            android.text.SpannableStringBuilder(label).apply {
+                val a = length
+                append(value)
+                setSpan(android.text.style.ForegroundColorSpan(color), a, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(android.text.style.RelativeSizeSpan(1.45f), a, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(android.text.style.StyleSpan(Typeface.BOLD), a, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (note != null) {
+                    val b = length
+                    append("  $note")
+                    setSpan(android.text.style.RelativeSizeSpan(0.85f), b, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+        var dialog: android.app.Dialog? = null
+        val folderName = try { DocumentFile.fromTreeUri(this, Uri.parse(savesTree))?.name } catch (_: Exception) { null } ?: "Saves"
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(term("> saves : $folderName", 11.5f, Hx.DIM))
+            addView(term(android.text.SpannableStringBuilder("> mod_playtime: ").apply {
+                val a = length
+                append(if (installed) tr("✓ terpasang", "✓ installed") else tr("✗ belum terpasang", "✗ not installed"))
+                setSpan(android.text.style.ForegroundColorSpan(if (installed) Hx.GREEN else Hx.AMBER), a, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }, 11.5f, Hx.DIM).apply { setPadding(0, px(2), 0, px(4)) })
+            if (!installed) {
+                addView(term(tr("⚠ Tanpa mod, yang tampil hanya jam main AKTIF (AFK tidak dihitung).\nPasang mod → aktifkan di daftar mod → restart RimWorld.",
+                    "⚠ Without the mod only ACTIVE play time is shown (AFK not counted).\nInstall the mod → enable it in the mod list → restart RimWorld."), 11f, Hx.AMBER).apply {
+                    background = boxBg(0x00000000, Hx.AMBER, 2)
+                    setPadding(px(10), px(8), px(10), px(8))
+                    setLineSpacing(px(2).toFloat(), 1f)
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(6) })
+                addView(button(tr("PASANG MOD PLAYTIME", "INSTALL PLAYTIME MOD"), solid = true) {
+                    dialog?.dismiss(); installPlayTimeMod()
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    gravity = Gravity.END; topMargin = px(8)
+                })
+            }
+            if (saves.isEmpty()) {
+                addView(term(tr("> tidak ada file .rws di folder ini", "> no .rws files in this folder"), 11.5f, Hx.AMBER).apply { setPadding(0, px(10), 0, 0) })
+            }
+            saves.forEachIndexed { i, sv ->
+                val tracked = sv.trackedSec != null
+                val tag = "SAVE_%02d · ".format(i + 1) + if (tracked) "⏱ TRACKED" else tr("BELUM DILACAK", "NOT TRACKED")
+                val col = if (tracked) Hx.GREEN else Hx.AMBER
+                val inner = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(term(sv.name, 13f, Hx.BRIGHT, bold = true))
+                    if (tracked) {
+                        addView(term(span("played: ", PlayTime.hours(sv.trackedSec!!), col), 11.5f, Hx.DIM).apply { setPadding(0, px(3), 0, 0) })
+                        addView(term(tr("di dalam save · AFK & pause ikut", "inside the save · AFK & pause included"), 10f, Hx.DIM))
+                        sv.activeSec?.let { addView(term(tr("aktif : ", "active: ") + PlayTime.hours(it) + tr("  (versi RimWorld)", "  (RimWorld's own)"), 11f, Hx.DIM)) }
+                    } else {
+                        addView(term(span("played: ", sv.activeSec?.let { PlayTime.hours(it) } ?: "?", col, tr("(aktif saja)", "(active only)")), 11.5f, Hx.DIM).apply { setPadding(0, px(3), 0, 0) })
+                        if (installed) addView(term(tr("buka save ini sekali dengan mod aktif", "open this save once with the mod enabled"), 10f, Hx.DIM))
+                    }
+                    sv.ticks?.let { addView(term("in_game: " + PlayTime.inGame(it), 11f, Hx.DIM)) }
+                    addView(term("last_save: " + dateFmt.format(Date(sv.modified)), 11f, Hx.DIM))
+                }
+                addView(HudBox(this@MainActivity, tag, mode = if (tracked) HudBox.Mode.OK else HudBox.Mode.INFO).apply { addView(inner) },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(8) })
+            }
+            if (saves.isNotEmpty()) {
+                addView(View(this@MainActivity).apply { setBackgroundColor(Hx.DARK) },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(1)).apply { topMargin = px(10) })
+                addView(term(android.text.SpannableStringBuilder(tr("> total played: ", "> total played: ")).apply {
+                    val a = length
+                    append(PlayTime.hours(saves.sumOf { it.playedSec }))
+                    setSpan(android.text.style.ForegroundColorSpan(Hx.BRIGHT), a, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    append(" · ${saves.size} saves")
+                }, 12f, Hx.DIM).apply { setPadding(0, px(8), 0, 0) })
+            }
+        }
+        AppLog.i("played_time: ${saves.size} save, mod ${if (installed) "terpasang" else "belum"}")
+        dialog = CmdDialog(this)
+            .setTitle("played_time · RIMWORLD")
+            .setRawView(body)
+            .setNeutralButton(tr("Pilih folder", "Choose folder")) { _, _ -> pickSaves.launch(null) }
+            .setPositiveButton(tr("Tutup", "Close"), null)
+            .show()
+    }
+
+    private fun installPlayTimeMod() {
+        if (busy) { toast(tr("Tunggu proses selesai dulu", "Wait for the current task to finish")); return }
+        val root = installRootUri()
+        if (root == null) {
+            CmdDialog(this)
+                .setTitle(tr("Pilih folder Mods", "Choose the Mods folder"))
+                .setMessage(tr("Folder Mods RimWorld belum diketahui. Pilih folder Mods-nya.", "The RimWorld Mods folder isn't known yet. Choose the Mods folder."))
+                .setNeutralButton(tr("Batal", "Cancel"), null)
+                .setPositiveButton(tr("Pilih", "Choose")) { _, _ -> afterOutputPicked = { installPlayTimeMod() }; pickOutput.launch(null) }
+                .show()
+            return
+        }
+        lifecycleScope.launch {
+            val err = withContext(Dispatchers.IO) {
+                try {
+                    val src = PlayTime.extractMod(this@MainActivity)
+                    val out = DocumentFile.fromTreeUri(this@MainActivity, Uri.parse(root))
+                        ?: throw Exception(tr("Folder Mods tidak bisa dibuka", "Can't open the Mods folder"))
+                    ModFiles.writeNewFolder(this@MainActivity, out, PlayTime.MOD_FOLDER, src, {})
+                    src.deleteRecursively()
+                    null
+                } catch (e: Exception) {
+                    e
+                }
+            }
+            if (isFinishing) return@launch
+            if (err == null) {
+                AppLog.i("Mod ModSync PlayTime dipasang ke folder Mods")
+                CmdDialog(this@MainActivity)
+                    .setTitle(tr("Mod PlayTime terpasang ✓", "PlayTime mod installed ✓"))
+                    .setMessage(tr("Langkah berikutnya:\n1. Buka RimWorld → Mods\n2. Aktifkan \"ModSync PlayTime\" (urutan bebas)\n3. Restart RimWorld\n4. Buka save → mulai dihitung (AFK & pause ikut)",
+                        "Next steps:\n1. Open RimWorld → Mods\n2. Enable \"ModSync PlayTime\" (any load order)\n3. Restart RimWorld\n4. Load a save → counting starts (AFK & pause included)"))
+                    .setPositiveButton("OK") { _, _ -> showPlayTime() }
+                    .show()
+            } else {
+                AppLog.e("Gagal pasang mod PlayTime", err)
+                CmdDialog(this@MainActivity)
+                    .setTitle(tr("Gagal pasang mod", "Couldn't install the mod"))
+                    .setMessage(err.message ?: err.toString())
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
+    }
 
     // ------------------------------------------------------------------ settings
 

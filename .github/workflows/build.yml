@@ -23,6 +23,15 @@ jobs:
         with:
           gradle-version: 8.14.3
 
+      - name: Build ModSync PlayTime mod
+        run: |
+          dotnet build rimworld-mod/ModSyncPlayTime/Source/ModSyncPlayTime.csproj -c Release
+          rm -rf app/src/main/assets/playtime_mod
+          mkdir -p app/src/main/assets/playtime_mod/ModSyncPlayTime
+          cp -r rimworld-mod/ModSyncPlayTime/About rimworld-mod/ModSyncPlayTime/Assemblies app/src/main/assets/playtime_mod/ModSyncPlayTime/
+          (cd app/src/main/assets/playtime_mod && zip -qr ../../../../../ModSyncPlayTime.zip ModSyncPlayTime)
+          find app/src/main/assets/playtime_mod -type f
+
       - name: Decrypt signing key
         env:
           SIGNING_PASS: ${{ secrets.SIGNING_PASS }}
@@ -79,4 +88,6 @@ jobs:
           name: ModSync Update (build ${{ github.run_number }})
           body_path: release_notes.md
           make_latest: true
-          files: ModSyncUpdate.apk
+          files: |
+            ModSyncUpdate.apk
+            ModSyncPlayTime.zip

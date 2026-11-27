@@ -54,7 +54,8 @@ object ModFiles {
             return listOfNotNull(scanModDir(ctx, root, ""))
         }
         return root.listFiles()
-            .filter { it.isDirectory && it.child("About")?.isDirectory == true }
+            // mod pendamping ModSync PlayTime bukan mod Workshop: tidak ikut daftar
+            .filter { it.isDirectory && !it.name.equals(PlayTime.MOD_FOLDER, ignoreCase = true) && it.child("About")?.isDirectory == true }
             .mapNotNull { scanModDir(ctx, it, it.name ?: "") }
     }
 
