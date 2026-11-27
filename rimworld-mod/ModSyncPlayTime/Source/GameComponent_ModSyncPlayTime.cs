@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Reflection;
 using UnityEngine;
 using Verse;
@@ -49,7 +50,13 @@ namespace ModSyncPlayTime
         public override void ExposeData()
         {
             base.ExposeData();
-            Scribe_Values.Look(ref modsyncRealSeconds, "modsyncRealSeconds", -1.0);
+            // stored as text (invariant culture) so it loads the same on every RimWorld version / phone language
+            string text = modsyncRealSeconds < 0 ? null : modsyncRealSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+            Scribe_Values.Look(ref text, "modsyncRealSeconds");
+            if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                modsyncRealSeconds = text != null && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : -1;
+            }
         }
     }
 }

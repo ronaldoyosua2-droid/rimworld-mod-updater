@@ -1,1 +1,5 @@
-- 🐞 **No more duplicate mod cards:** a mod added with **[+] LINK/ID** is now recorded as a normal folder mod once it is downloaded, so it no longer shows up twice after the folder is re-read. Existing duplicates (same Workshop ID listed as both "link" and "folder") are merged automatically, keeping the latest `last_update`.
+- ⏱ **New: played_time** (☰ menu) — see how long you've played each RimWorld save: play time, in-game date and last save time, plus a total.
+- 🧩 **New companion mod: ModSync PlayTime** — install it with one tap from the played_time screen. It counts the real time you spend inside each save, **AFK and pause included**, and stores it in the save itself.
+- 📂 Without the mod you still see RimWorld's own "active" play time (it stops counting after ~90 s without touching the screen).
+- 📦 The mod is also attached to this release as `ModSyncPlayTime.zip` for manual install.
+- 🔒 Save files are only read, never changed by the app.
