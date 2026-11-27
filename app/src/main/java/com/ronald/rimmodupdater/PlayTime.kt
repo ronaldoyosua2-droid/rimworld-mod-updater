@@ -89,7 +89,7 @@ object PlayTime {
             return if (b < 0) null else line.substring(a + open.length, b).trim()
         }
         try {
-            ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8, 256 * 1024)?.use { r ->
+            ctx.contentResolver.openInputStream(uri)?.let { java.io.BufferedReader(java.io.InputStreamReader(it, Charsets.UTF_8), 256 * 1024) }?.use { r ->
                 while (true) {
                     val line = r.readLine() ?: break
                     if (line.indexOf('<') < 0) continue
