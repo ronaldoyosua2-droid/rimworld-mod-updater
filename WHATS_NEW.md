@@ -1,5 +1,3 @@
-- ⏱ **New: played_time** (☰ menu) — see how long you've played each RimWorld save: play time, in-game date and last save time, plus a total.
-- 🧩 **New companion mod: ModSync PlayTime** — install it with one tap from the played_time screen. It counts the real time you spend inside each save, **AFK and pause included**, and stores it in the save itself.
-- 📂 Without the mod you still see RimWorld's own "active" play time (it stops counting after ~90 s without touching the screen).
-- 📦 The mod is also attached to this release as `ModSyncPlayTime.zip` for manual install.
-- 🔒 Save files are only read, never changed by the app.
+- 🧩 **ModSync PlayTime mod v1.1.0** — now marked for **RimWorld 1.7** (no more version warning) and the copyright line shows correctly.
+- ⟳ **Update the PlayTime mod right from the app** — played_time checks the latest GitHub release; if a newer mod exists you get an **UPDATE PLAYTIME MOD** button (no new APK needed for future mod fixes). Works offline with the copy inside the app.
+- 🗂️ **Autosaves are grouped with their colony** — one card per colony (+N autosaves), so the total play time is no longer counted twice.

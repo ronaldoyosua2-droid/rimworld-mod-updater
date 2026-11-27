@@ -3,14 +3,16 @@
   <name>ModSync PlayTime</name>
   <author>Ronald</author>
   <packageId>ronald.modsync.playtime</packageId>
+  <modVersion>1.1.0</modVersion>
   <supportedVersions>
     <li>1.4</li>
     <li>1.5</li>
     <li>1.6</li>
+    <li>1.7</li>
   </supportedVersions>
   <description>Counts the real time you spend inside each save (AFK and pause included) and stores it in the save file, so the ModSync Update app can show your play time per colony.
 
 No gameplay changes. Load order does not matter. Safe to add to an existing save.
 
-© 2026 Ronald · All rights reserved.</description>
+© Ronald · All rights reserved.</description>
 </ModMetaData>
