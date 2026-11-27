@@ -5,3 +5,8 @@ local.properties
 .idea/
 signing/release.jks
 signing/keystore.properties
+rimworld-mod/ModSyncPlayTime/Assemblies/
+rimworld-mod/ModSyncPlayTime/Source/obj/
+rimworld-mod/ModSyncPlayTime/Source/bin/
+app/src/main/assets/playtime_mod/
+ModSyncPlayTime.zip

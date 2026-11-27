@@ -130,6 +130,10 @@ class ModStore(context: Context) {
 
     fun setOutputFor(game: String, uri: String) = prefs.edit().putString("outputTree_$game", uri).apply()
 
+    /** Folder Saves game (untuk played_time). */
+    fun savesFor(game: String): String? = prefs.getString("savesTree_$game", null)
+    fun setSavesFor(game: String, uri: String) = prefs.edit().putString("savesTree_$game", uri).apply()
+
     /** Ringkasan per game: (waktu ms, jumlah mod). */
     fun lastScan(game: String): Pair<Long, Int> = prefs.getLong("lastScan_$game", 0) to prefs.getInt("lastScanN_$game", 0)
     fun setLastScan(game: String, n: Int) = prefs.edit().putLong("lastScan_$game", System.currentTimeMillis()).putInt("lastScanN_$game", n).apply()
